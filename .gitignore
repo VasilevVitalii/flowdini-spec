@@ -1,0 +1,5 @@
+.hermes.md
+.env
+.connect.json
+node_modules/
+dist/
