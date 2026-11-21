@@ -1,8 +1,9 @@
 export { FdMd } from './FdMd.js';
 export { parseMarkdown } from './parse.js';
 export type {
-  TFdSchema,
+  TFdContent,
   TFdContentItem,
+  TFdContentTopic,
   TFdInlineField,
   TFdLevel,
   FdMdParams,

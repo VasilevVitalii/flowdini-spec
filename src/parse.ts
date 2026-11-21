@@ -1,8 +1,9 @@
 import type {
+  TFdContent,
   TFdContentItem,
+  TFdContentTopic,
   TFdInlineField,
   TFdLevel,
-  TFdSchema,
 } from './types.js';
 
 /** Inline-поле `[param:: value]`: разделитель — первое `::`, значение без `[`/`]`. */
@@ -79,22 +80,30 @@ function isClosingFence(line: string, char: string, len: number): boolean {
   return re.test(line);
 }
 
-export function parseMarkdown(content: string): TFdSchema {
-  const schema: TFdSchema = { inlineList: [], contentList: [] };
+/** Пустое тело (только whitespace) не сохраняется — `text` остаётся отсутствующим. */
+function finishText(bodyLines: string[]): string | undefined {
+  const text = bodyLines.join('\n');
+  return text.trim() === '' ? undefined : text;
+}
+
+export function parseMarkdown(content: string): TFdContent {
+  const result: TFdContent = { inlineList: [], itemList: [] };
   const lines = content.split(/\r?\n/);
 
   let level1: TFdLevel | null = null;
   let level2: TFdLevel | null = null;
   let level3: TFdLevel | null = null;
-  let currentInline: TFdInlineField[] = schema.inlineList;
+  let currentItem: TFdContentItem | null = null;
+  let bodyLines: string[] = [];
 
   let inFence = false;
   let fenceChar = '';
   let fenceLen = 0;
 
-  // Fenced-блок: заголовки и inline-поля внутри — литерал, не парсятся.
   for (const line of lines) {
     if (inFence) {
+      // Fenced-блок — литерал: строки идут в тело раздела как есть.
+      bodyLines.push(line);
       if (isClosingFence(line, fenceChar, fenceLen)) inFence = false;
       continue;
     }
@@ -104,11 +113,15 @@ export function parseMarkdown(content: string): TFdSchema {
       inFence = true;
       fenceChar = open.char;
       fenceLen = open.len;
+      bodyLines.push(line);
       continue;
     }
 
     const heading = matchHeading(line);
     if (heading) {
+      if (currentItem) currentItem.text = finishText(bodyLines);
+      bodyLines = [];
+
       const level = parseLevel(stripFields(heading.text));
       const fields = extractFields(heading.text);
       if (heading.level === 1) {
@@ -121,17 +134,24 @@ export function parseMarkdown(content: string): TFdSchema {
       } else {
         level3 = level;
       }
-      const item: TFdContentItem = { level1, level2, level3, inlineList: fields };
-      schema.contentList.push(item);
-      currentInline = item.inlineList;
+
+      const topic: TFdContentTopic = { level1, level2, level3, inlineList: fields };
+      const item: TFdContentItem = { topic };
+      result.itemList.push(item);
+      currentItem = item;
       continue;
     }
 
+    // Обычная строка тела: сохраняется в text; inline-поля дополнительно индексируются.
+    bodyLines.push(line);
     const fields = extractFields(line);
     if (fields.length > 0) {
-      currentInline.push(...fields);
+      if (currentItem) currentItem.topic.inlineList.push(...fields);
+      else result.inlineList.push(...fields);
     }
   }
 
-  return schema;
+  if (currentItem) currentItem.text = finishText(bodyLines);
+
+  return result;
 }

@@ -8,11 +8,11 @@ import { parseMarkdown, FdMd } from '../dist/index.js';
 
 // parseMarkdown: title + idx
 assert.deepStrictEqual(
-  parseMarkdown('# question 2').contentList[0].level1,
+  parseMarkdown('# question 2').itemList[0].topic.level1,
   { title: 'question', idx: 2 },
 );
 assert.deepStrictEqual(
-  parseMarkdown('# question - 1').contentList[0].level1,
+  parseMarkdown('# question - 1').itemList[0].topic.level1,
   { title: 'question -', idx: 1 },
 );
 
@@ -21,7 +21,7 @@ assert.deepStrictEqual(parseMarkdown('[par:: a, b]').inlineList, [
   { param: 'par', valueList: ['a', 'b'] },
 ]);
 
-// FdMd: scan / getFileList / getSchema
+// FdMd: scan / getFileList / getContent
 const root = await mkdtemp(path.join(tmpdir(), 'flowdini-smoke-'));
 try {
   await writeFile(path.join(root, 'a.md'), '# chapter 1');
@@ -32,9 +32,9 @@ try {
   await fd.scan();
   assert.deepStrictEqual(fd.getFileList(), ['a.md', 'sub/b.md']);
 
-  const schema = await fd.getSchema('sub/b.md');
+  const schema = await fd.getContent('sub/b.md');
   assert.deepStrictEqual(schema.inlineList, [{ param: 'p', valueList: ['v'] }]);
-  assert.deepStrictEqual(schema.contentList[0].level2, {
+  assert.deepStrictEqual(schema.itemList[0].topic.level2, {
     title: 'chapter',
     idx: 2,
   });

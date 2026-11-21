@@ -13,27 +13,35 @@ describe('parseMarkdown', () => {
 
     expect(parseMarkdown(content)).toEqual({
       inlineList: [],
-      contentList: [
+      itemList: [
         {
-          level1: { title: 'chapter', idx: 1 },
-          level2: null,
-          level3: null,
-          inlineList: [],
+          topic: {
+            level1: { title: 'chapter', idx: 1 },
+            level2: null,
+            level3: null,
+            inlineList: [],
+          },
         },
         {
-          level1: { title: 'chapter', idx: 1 },
-          level2: { title: 'chapter', idx: 2 },
-          level3: null,
-          inlineList: [
-            { param: 'par1', valueList: ['val1'] },
-            { param: 'par2', valueList: ['val1', 'val2'] },
-          ],
+          topic: {
+            level1: { title: 'chapter', idx: 1 },
+            level2: { title: 'chapter', idx: 2 },
+            level3: null,
+            inlineList: [
+              { param: 'par1', valueList: ['val1'] },
+              { param: 'par2', valueList: ['val1', 'val2'] },
+            ],
+          },
+          text: '[par1:: val1] [par2:: val1, val2]',
         },
         {
-          level1: { title: 'chapter', idx: 1 },
-          level2: { title: 'chapter', idx: 2 },
-          level3: { title: 'chapter', idx: 3 },
-          inlineList: [{ param: 'par1', valueList: ['val4', 'val5'] }],
+          topic: {
+            level1: { title: 'chapter', idx: 1 },
+            level2: { title: 'chapter', idx: 2 },
+            level3: { title: 'chapter', idx: 3 },
+            inlineList: [{ param: 'par1', valueList: ['val4', 'val5'] }],
+          },
+          text: '[par1:: val4, val5]',
         },
       ],
     });
@@ -43,12 +51,14 @@ describe('parseMarkdown', () => {
     const content = '[p:: v]\n# h1';
     expect(parseMarkdown(content)).toEqual({
       inlineList: [{ param: 'p', valueList: ['v'] }],
-      contentList: [
+      itemList: [
         {
-          level1: { title: 'h1', idx: null },
-          level2: null,
-          level3: null,
-          inlineList: [],
+          topic: {
+            level1: { title: 'h1', idx: null },
+            level2: null,
+            level3: null,
+            inlineList: [],
+          },
         },
       ],
     });
@@ -56,43 +66,60 @@ describe('parseMarkdown', () => {
 
   it('### без предков → level1/level2 null', () => {
     const content = '### chapter 3';
-    expect(parseMarkdown(content).contentList[0]).toEqual({
-      level1: null,
-      level2: null,
-      level3: { title: 'chapter', idx: 3 },
-      inlineList: [],
+    expect(parseMarkdown(content).itemList[0]).toEqual({
+      topic: {
+        level1: null,
+        level2: null,
+        level3: { title: 'chapter', idx: 3 },
+        inlineList: [],
+      },
     });
   });
 
-  it('поле на строке заголовка → в новую запись, из текста заголовка вычищается', () => {
+  it('поле на строке заголовка → в topic, из текста заголовка вычищается', () => {
     const content = '# chapter 1\n## chapter 2 [par:: val]';
     const schema = parseMarkdown(content);
-    expect(schema.contentList[1]).toEqual({
-      level1: { title: 'chapter', idx: 1 },
-      level2: { title: 'chapter', idx: 2 },
-      level3: null,
-      inlineList: [{ param: 'par', valueList: ['val'] }],
+    expect(schema.itemList[1]).toEqual({
+      topic: {
+        level1: { title: 'chapter', idx: 1 },
+        level2: { title: 'chapter', idx: 2 },
+        level3: null,
+        inlineList: [{ param: 'par', valueList: ['val'] }],
+      },
     });
   });
 
-  it('fenced-блок: заголовки и поля внутри игнорируются', () => {
+  it('текст тела сохраняется в text', () => {
+    const content = '# h\nline one\nline two';
+    expect(parseMarkdown(content).itemList[0]).toEqual({
+      topic: {
+        level1: { title: 'h', idx: null },
+        level2: null,
+        level3: null,
+        inlineList: [],
+      },
+      text: 'line one\nline two',
+    });
+  });
+
+  it('пустое тело → text отсутствует', () => {
+    const content = '# h\n\n## next';
+    expect(parseMarkdown(content).itemList[0].text).toBeUndefined();
+  });
+
+  it('fenced-блок: заголовки и поля внутри не парсятся, но идут в text', () => {
     const content = [
+      '# h',
       '```',
       '# not a heading',
       '[par:: val]',
       '```',
-      '## real heading',
+      'tail',
     ].join('\n');
     const schema = parseMarkdown(content);
     expect(schema.inlineList).toEqual([]);
-    expect(schema.contentList).toEqual([
-      {
-        level1: null,
-        level2: { title: 'real heading', idx: null },
-        level3: null,
-        inlineList: [],
-      },
-    ]);
+    expect(schema.itemList[0].topic.inlineList).toEqual([]);
+    expect(schema.itemList[0].text).toBe('```\n# not a heading\n[par:: val]\n```\ntail');
   });
 
   it('одиночный : в значении не разваливает', () => {
@@ -109,19 +136,20 @@ describe('parseMarkdown', () => {
     ]);
   });
 
-  it('уровни 4+ игнорируются', () => {
+  it('уровни 4+ не создают раздел, строка уходит в text предыдущего', () => {
     const content = '# a\n#### deep\n## b';
     const schema = parseMarkdown(content);
-    expect(schema.contentList.map((c) => c.level2)).toEqual([
+    expect(schema.itemList.map((c) => c.topic.level2)).toEqual([
       null,
       { title: 'b', idx: null },
     ]);
+    expect(schema.itemList[0].text).toBe('#### deep');
   });
 
   it('CRLF-переносы обрабатываются', () => {
     const content = '# a\r\n## b\r\n[par:: val]';
     const schema = parseMarkdown(content);
-    expect(schema.contentList[1].inlineList).toEqual([
+    expect(schema.itemList[1].topic.inlineList).toEqual([
       { param: 'par', valueList: ['val'] },
     ]);
   });
@@ -136,7 +164,7 @@ describe('parseMarkdown', () => {
   describe('разбор title + idx', () => {
     it('# question 2 → title "question", idx 2', () => {
       const content = '# question 2';
-      expect(parseMarkdown(content).contentList[0].level1).toEqual({
+      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
         title: 'question',
         idx: 2,
       });
@@ -144,7 +172,7 @@ describe('parseMarkdown', () => {
 
     it('# question  (пробел в конце) → title "question", idx null', () => {
       const content = '# question ';
-      expect(parseMarkdown(content).contentList[0].level1).toEqual({
+      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
         title: 'question',
         idx: null,
       });
@@ -152,7 +180,7 @@ describe('parseMarkdown', () => {
 
     it('# question -1 → title "question", idx -1', () => {
       const content = '# question -1';
-      expect(parseMarkdown(content).contentList[0].level1).toEqual({
+      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
         title: 'question',
         idx: -1,
       });
@@ -160,7 +188,7 @@ describe('parseMarkdown', () => {
 
     it('# question - 1 → title "question -", idx 1', () => {
       const content = '# question - 1';
-      expect(parseMarkdown(content).contentList[0].level1).toEqual({
+      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
         title: 'question -',
         idx: 1,
       });
@@ -168,7 +196,7 @@ describe('parseMarkdown', () => {
 
     it('без числа → idx null', () => {
       const content = '# intro';
-      expect(parseMarkdown(content).contentList[0].level1).toEqual({
+      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
         title: 'intro',
         idx: null,
       });

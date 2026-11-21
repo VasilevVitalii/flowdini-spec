@@ -27,13 +27,13 @@ describe('FdMd', () => {
     expect(fd.getFileList()).toEqual(['a.md', 'sub/b.md']);
   });
 
-  it('getSchema возвращает схему файла', async () => {
+  it('getContent возвращает контент файла', async () => {
     await writeFile(path.join(root, 'a.md'), '# chapter 1\n## chapter 2');
     const fd = new FdMd({ dir: root });
     await fd.scan();
-    const schema = await fd.getSchema('a.md');
-    expect(schema.contentList).toHaveLength(2);
-    expect(schema.contentList[1].level2).toEqual({ title: 'chapter', idx: 2 });
+    const schema = await fd.getContent('a.md');
+    expect(schema.itemList).toHaveLength(2);
+    expect(schema.itemList[1].topic.level2).toEqual({ title: 'chapter', idx: 2 });
   });
 
   it('кэш: без изменений не перечитывает, после изменения — перечитывает', async () => {
@@ -42,14 +42,14 @@ describe('FdMd', () => {
     const fd = new FdMd({ dir: root });
     await fd.scan();
 
-    const s1 = await fd.getSchema('a.md');
-    const s2 = await fd.getSchema('a.md');
+    const s1 = await fd.getContent('a.md');
+    const s2 = await fd.getContent('a.md');
     expect(s2).toBe(s1); // тот же закэшированный объект
 
     await writeFile(file, '# v1\n## v2');
-    const s3 = await fd.getSchema('a.md');
+    const s3 = await fd.getContent('a.md');
     expect(s3).not.toBe(s1);
-    expect(s3.contentList).toHaveLength(2);
+    expect(s3.itemList).toHaveLength(2);
   });
 
   it('повторный scan сбрасывает кэш', async () => {
@@ -57,22 +57,22 @@ describe('FdMd', () => {
     await writeFile(file, '# v1');
     const fd = new FdMd({ dir: root });
     await fd.scan();
-    const s1 = await fd.getSchema('a.md');
+    const s1 = await fd.getContent('a.md');
 
     await fd.scan();
-    const s2 = await fd.getSchema('a.md');
+    const s2 = await fd.getContent('a.md');
     expect(s2).not.toBe(s1);
   });
 
-  it('удалённый файл → пустая схема', async () => {
+  it('удалённый файл → пустой контент', async () => {
     const file = path.join(root, 'a.md');
     await writeFile(file, '# v1');
     const fd = new FdMd({ dir: root });
     await fd.scan();
     await rm(file);
 
-    const schema = await fd.getSchema('a.md');
-    expect(schema).toEqual({ inlineList: [], contentList: [] });
+    const schema = await fd.getContent('a.md');
+    expect(schema).toEqual({ inlineList: [], itemList: [] });
   });
 
   it('фильтр deny: 111.md и *2.md в корне исключаются, в подпапках — нет', async () => {

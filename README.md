@@ -17,13 +17,13 @@ const fd = new FdMd({ dir: './specs' });
 await fd.scan();
 
 for (const file of fd.getFileList()) {
-  const schema = await fd.getSchema(file);
+  const schema = await fd.getContent(file);
   // schema.inlineList  — поля до первого заголовка
-  // schema.contentList — записи по заголовкам
+  // schema.itemList — записи по заголовкам
 }
 ```
 
-Низкоуровневый парсинг строки: `parseMarkdown(content)` (тот же `TFdSchema`).
+Низкоуровневый парсинг строки: `parseMarkdown(content)` (тот же `TFdContent`).
 
 ## API
 
@@ -31,7 +31,7 @@ for (const file of fd.getFileList()) {
 |---|---|---|
 | `scan` | `async scan(): Promise<void>` | Рекурсивно обходит `dir`, формирует список файлов; повторный вызов сбрасывает кэш. |
 | `getFileList` | `getFileList(): string[]` | Относительные пути от `dir`, разделитель `/`, лексикографический порядок. |
-| `getSchema` | `async getSchema(fileItem): Promise<TFdSchema>` | Схема файла (элемент `getFileList`), кэш по `mtime + size`. |
+| `getContent` | `async getContent(fileItem): Promise<TFdContent>` | Контент файла (элемент `getFileList`), кэш по `mtime + size`. |
 
 Конструктор: `new FdMd({ dir, filter? })`, где `filter: { list: string[], action: 'allow' | 'deny' }`.
 
@@ -48,16 +48,21 @@ interface TFdInlineField {
   valueList: string[];
 }
 
-interface TFdContentItem {
+interface TFdContentTopic {
   level1: TFdLevel | null;
   level2: TFdLevel | null;
   level3: TFdLevel | null;
   inlineList: TFdInlineField[];
 }
 
-interface TFdSchema {
+interface TFdContentItem {
+  topic: TFdContentTopic;
+  text?: string;            // тело раздела (сырой текст), отсутствует если пусто
+}
+
+interface TFdContent {
   inlineList: TFdInlineField[];  // преамбула: поля до первого заголовка
-  contentList: TFdContentItem[];
+  itemList: TFdContentItem[];
 }
 ```
 
@@ -66,7 +71,7 @@ interface TFdSchema {
 ### Заголовки
 
 - ATX-заголовки уровней 1–3; уровень = числу `#`. Уровни 4+ игнорируются.
-- Каждый заголовок создаёт новую запись `contentList`; старший уровень сбрасывает младшие в `null`. Отсутствующие предки — `null`.
+- Каждый заголовок создаёт новую запись `itemList`; старший уровень сбрасывает младшие в `null`. Отсутствующие предки — `null`.
 - Заголовок разбивается на `title` + `idx`: если последний whitespace-токен — целое число (со знаком `-`), он уходит в `idx`, остаток — в `title`; иначе `idx: null`, `title` — весь текст.
   - `# question 2` → `{ title: 'question', idx: 2 }`
   - `# question ` → `{ title: 'question', idx: null }`
@@ -88,6 +93,12 @@ interface TFdSchema {
 - Поля до первого заголовка → верхний `inlineList` (преамбула).
 - Поле на строке заголовка → в новую запись, из текста заголовка вычищается.
 
+### Тело раздела (`text`)
+
+- Строки между заголовком и следующим заголовком — тело раздела; сохраняются в `text` сырыми (как есть, включая строки с inline-полями и fenced-блоки).
+- Inline-поля тела дополнительно индексируются в `topic.inlineList` (не вычищаются из `text` — `text` каноничен для обратной сборки).
+- Пустое тело (только whitespace) → `text` отсутствует (`undefined`).
+
 ## Фильтр
 
 - Дефолт — все `*.md` рекурсивно (`**/*.md`).
@@ -97,7 +108,7 @@ interface TFdSchema {
 ## Кэш и ошибки
 
 - Кэш по `mtime + size`; без изменений файл не перечитывается.
-- Ошибка чтения/парсинга → пустая схема `{ inlineList: [], contentList: [] }`, кэш для файла сбрасывается.
+- Ошибка чтения/парсинга → пустой контент `{ inlineList: [], itemList: [] }`, кэш для файла сбрасывается.
 
 ## Пример
 
@@ -111,29 +122,42 @@ interface TFdSchema {
 [par1:: val4, val5]
 ```
 
-Выход (`getSchema`):
+Выход (`getContent`):
 
 ```json
 {
   "inlineList": [],
-  "contentList": [
-    { "level1": { "title": "chapter", "idx": 1 }, "level2": null, "level3": null, "inlineList": [] },
+  "itemList": [
     {
-      "level1": { "title": "chapter", "idx": 1 },
-      "level2": { "title": "chapter", "idx": 2 },
-      "level3": null,
-      "inlineList": [
-        { "param": "par1", "valueList": ["val1"] },
-        { "param": "par2", "valueList": ["val1", "val2"] }
-      ]
+      "topic": {
+        "level1": { "title": "chapter", "idx": 1 },
+        "level2": null,
+        "level3": null,
+        "inlineList": []
+      }
     },
     {
-      "level1": { "title": "chapter", "idx": 1 },
-      "level2": { "title": "chapter", "idx": 2 },
-      "level3": { "title": "chapter", "idx": 3 },
-      "inlineList": [
-        { "param": "par1", "valueList": ["val4", "val5"] }
-      ]
+      "topic": {
+        "level1": { "title": "chapter", "idx": 1 },
+        "level2": { "title": "chapter", "idx": 2 },
+        "level3": null,
+        "inlineList": [
+          { "param": "par1", "valueList": ["val1"] },
+          { "param": "par2", "valueList": ["val1", "val2"] }
+        ]
+      },
+      "text": "[par1:: val1] [par2:: val1, val2]"
+    },
+    {
+      "topic": {
+        "level1": { "title": "chapter", "idx": 1 },
+        "level2": { "title": "chapter", "idx": 2 },
+        "level3": { "title": "chapter", "idx": 3 },
+        "inlineList": [
+          { "param": "par1", "valueList": ["val4", "val5"] }
+        ]
+      },
+      "text": "[par1:: val4, val5]"
     }
   ]
 }

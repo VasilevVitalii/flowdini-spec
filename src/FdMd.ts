@@ -3,16 +3,16 @@ import type { Dirent } from 'node:fs';
 import * as path from 'node:path';
 import micromatch from 'micromatch';
 import { parseMarkdown } from './parse.js';
-import type { FdMdFilter, FdMdParams, TFdSchema } from './types.js';
+import type { FdMdFilter, FdMdParams, TFdContent } from './types.js';
 
 interface CacheEntry {
   mtimeMs: number;
   size: number;
-  schema: TFdSchema;
+  content: TFdContent;
 }
 
-function emptySchema(): TFdSchema {
-  return { inlineList: [], contentList: [] };
+function emptyContent(): TFdContent {
+  return { inlineList: [], itemList: [] };
 }
 
 export class FdMd {
@@ -39,8 +39,8 @@ export class FdMd {
     return [...this.fileList];
   }
 
-  /** Кэш по `mtime + size`; ошибка чтения → пустая схема, кэш файла сбрасывается. */
-  async getSchema(fileItem: string): Promise<TFdSchema> {
+  /** Кэш по `mtime + size`; ошибка чтения → пустой контент, кэш файла сбрасывается. */
+  async getContent(fileItem: string): Promise<TFdContent> {
     const fullPath = path.resolve(this.dir, fileItem);
 
     let mtimeMs: number;
@@ -51,25 +51,25 @@ export class FdMd {
       size = stat.size;
     } catch {
       this.cache.delete(fileItem);
-      return emptySchema();
+      return emptyContent();
     }
 
     const cached = this.cache.get(fileItem);
     if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
-      return cached.schema;
+      return cached.content;
     }
 
-    let schema: TFdSchema;
+    let content: TFdContent;
     try {
-      const content = await fs.readFile(fullPath, 'utf8');
-      schema = parseMarkdown(content);
+      const text = await fs.readFile(fullPath, 'utf8');
+      content = parseMarkdown(text);
     } catch {
       this.cache.delete(fileItem);
-      return emptySchema();
+      return emptyContent();
     }
 
-    this.cache.set(fileItem, { mtimeMs, size, schema });
-    return schema;
+    this.cache.set(fileItem, { mtimeMs, size, content });
+    return content;
   }
 
   /** micromatch против относительного пути: `*` не пересекает `/`, `**` — пересекает; регистрозависимо. */
