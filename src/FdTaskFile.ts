@@ -42,13 +42,7 @@ export class FdTaskFile {
   }
 
   private async walk(dir: string): Promise<string[]> {
-    let entries;
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-
+    const entries = await fs.readdir(dir, { withFileTypes: true });
     const out: string[] = [];
     for (const entry of entries) {
       if (entry.name.startsWith('.')) continue;

@@ -20,6 +20,7 @@ describe('textToStructure (allowText: true)', () => {
 
     expect(textToStructure(content, true)).toEqual({
       inlineList: [],
+      text: null,
       itemList: [
         {
           topic: {
@@ -36,20 +37,20 @@ describe('textToStructure (allowText: true)', () => {
             level2: { title: 'chapter', idx: 2 },
             level3: null,
             inlineList: [
-              { param: 'par1', valueList: ['val1'], source: 'body' },
-              { param: 'par2', valueList: ['val1', 'val2'], source: 'body' },
+              { param: 'par1', valueList: ['val1'], source: 'topic' },
+              { param: 'par2', valueList: ['val1', 'val2'], source: 'topic' },
             ],
           },
-          text: '[par1:: val1] [par2:: val1, val2]',
+          text: null,
         },
         {
           topic: {
             level1: { title: 'chapter', idx: 1 },
             level2: { title: 'chapter', idx: 2 },
             level3: { title: 'chapter', idx: 3 },
-            inlineList: [{ param: 'par1', valueList: ['val4', 'val5'], source: 'body' }],
+            inlineList: [{ param: 'par1', valueList: ['val4', 'val5'], source: 'topic' }],
           },
-          text: '[par1:: val4, val5]',
+          text: null,
         },
       ],
     });
@@ -59,10 +60,11 @@ describe('textToStructure (allowText: true)', () => {
     const content = '[p:: v]\n# h1';
     expect(textToStructure(content, true)).toEqual({
       inlineList: [{ param: 'p', valueList: ['v'] }],
+      text: null,
       itemList: [
         {
           topic: {
-            level1: { title: 'h1', idx: null },
+            level1: { title: 'h1', idx: 0 },
             level2: null,
             level3: null,
             inlineList: [],
@@ -71,6 +73,25 @@ describe('textToStructure (allowText: true)', () => {
         },
       ],
     });
+  });
+
+  it('преамбула-текст до первого заголовка → text', () => {
+    const content = 'Вводный текст.\n\n# h1\nbody';
+    const res = textToStructure(content, true);
+    expect(res.text).toBe('Вводный текст.');
+    expect(res.inlineList).toEqual([]);
+  });
+
+  it('преамбула-текст с полем: текст отдельно, поле в inlineList', () => {
+    const content = 'Заголовок проекта.\n[project:: returns]\n# h1';
+    const res = textToStructure(content, true);
+    expect(res.text).toBe('Заголовок проекта.');
+    expect(res.inlineList).toEqual([{ param: 'project', valueList: ['returns'] }]);
+  });
+
+  it('contentToText round-trip преамбулы-текста', () => {
+    const src = 'Вводный текст.\n[project:: returns]\n# h1\nbody';
+    expect(contentToText(textToStructure(src, true))).toBe(src);
   });
 
   it('### без предков → level1/level2 null', () => {
@@ -86,15 +107,15 @@ describe('textToStructure (allowText: true)', () => {
     });
   });
 
-  it('поле на строке заголовка → в topic, из текста заголовка вычищается', () => {
+  it('поле на строке заголовка не парсится — остаётся в title', () => {
     const content = '# chapter 1\n## chapter 2 [par:: val]';
     const res = textToStructure(content, true);
     expect(res.itemList[1]).toEqual({
       topic: {
         level1: { title: 'chapter', idx: 1 },
-        level2: { title: 'chapter', idx: 2 },
+        level2: { title: 'chapter 2 [par:: val]', idx: 0 },
         level3: null,
-        inlineList: [{ param: 'par', valueList: ['val'], source: 'heading' }],
+        inlineList: [],
       },
       text: null,
     });
@@ -104,7 +125,7 @@ describe('textToStructure (allowText: true)', () => {
     const content = '# h\nline one\nline two';
     expect(textToStructure(content, true).itemList[0]).toEqual({
       topic: {
-        level1: { title: 'h', idx: null },
+        level1: { title: 'h', idx: 0 },
         level2: null,
         level3: null,
         inlineList: [],
@@ -152,7 +173,7 @@ describe('textToStructure (allowText: true)', () => {
     const res = textToStructure(content, true);
     expect(res.itemList.map((c) => c.topic.level2)).toEqual([
       null,
-      { title: 'b', idx: null },
+      { title: 'b', idx: 0 },
     ]);
     expect(res.itemList[0].text).toBe('#### deep');
   });
@@ -161,7 +182,7 @@ describe('textToStructure (allowText: true)', () => {
     const content = '# a\r\n## b\r\n[par:: val]';
     const res = textToStructure(content, true);
     expect(res.itemList[1].topic.inlineList).toEqual([
-      { param: 'par', valueList: ['val'], source: 'body' },
+      { param: 'par', valueList: ['val'], source: 'topic' },
     ]);
   });
 
@@ -181,11 +202,11 @@ describe('textToStructure (allowText: true)', () => {
       });
     });
 
-    it('# question  (пробел в конце) → title "question", idx null', () => {
+    it('# question  (пробел в конце) → title "question", idx 0', () => {
       const content = '# question ';
       expect(textToStructure(content, true).itemList[0].topic.level1).toEqual({
         title: 'question',
-        idx: null,
+        idx: 0,
       });
     });
 
@@ -205,11 +226,11 @@ describe('textToStructure (allowText: true)', () => {
       });
     });
 
-    it('без числа → idx null', () => {
+    it('без числа → idx 0', () => {
       const content = '# intro';
       expect(textToStructure(content, true).itemList[0].topic.level1).toEqual({
         title: 'intro',
-        idx: null,
+        idx: 0,
       });
     });
   });
@@ -222,7 +243,7 @@ describe('textToStructure (allowText: false)', () => {
     expect(res.itemList).toHaveLength(2);
     expect(res.itemList[0].text).toBeNull();
     expect(res.itemList[0].topic.inlineList).toEqual([
-      { param: 'par', valueList: ['val'], source: 'body' },
+      { param: 'par', valueList: ['val'], source: 'topic' },
     ]);
     expect(res.itemList[1].text).toBeNull();
   });
@@ -247,17 +268,30 @@ describe('сериализация', () => {
   });
 
   it('levelToText: без idx', () => {
-    expect(levelToText({ title: 'chapter', idx: null }, 3)).toBe('### chapter');
+    expect(levelToText({ title: 'chapter', idx: 0 }, 3)).toBe('### chapter');
   });
 
-  it('topicToText: самый глубокий уровень + поля в ту же строку', () => {
+  it('topicToText: поле без source не выводится (нет места для него)', () => {
     const topic = {
       level1: { title: 'chapter', idx: 1 },
       level2: { title: 'chapter', idx: 2 },
       level3: null,
       inlineList: [{ param: 'par', valueList: ['val'] }],
     };
-    expect(topicToText(topic)).toBe('## chapter 2 [par:: val]');
+    expect(topicToText(topic)).toBe('## chapter 2');
+  });
+
+  it('topicToText: topic-поля — отдельной строкой после заголовка', () => {
+    const topic = {
+      level1: null,
+      level2: { title: 'Q', idx: 1 },
+      level3: null,
+      inlineList: [
+        { param: 'fd-createdAt', valueList: ['2026-11-14 10:30:00'], source: 'topic' as const },
+        { param: 'fd-from', valueList: ['AI.ARCHITECT'], source: 'topic' as const },
+      ],
+    };
+    expect(topicToText(topic)).toBe('## Q 1\n[fd-createdAt:: 2026-11-14 10:30:00]\n[fd-from:: AI.ARCHITECT]');
   });
 
   it('topicToText: пустой топик → пустая строка', () => {
@@ -267,7 +301,7 @@ describe('сериализация', () => {
   it('itemToText: заголовок + текст через перенос', () => {
     const item = {
       topic: {
-        level1: { title: 'h', idx: null },
+        level1: { title: 'h', idx: 0 },
         level2: null,
         level3: null,
         inlineList: [],
@@ -280,7 +314,7 @@ describe('сериализация', () => {
   it('itemToText: без текста — только заголовок', () => {
     const item = {
       topic: {
-        level1: { title: 'h', idx: null },
+        level1: { title: 'h', idx: 0 },
         level2: null,
         level3: null,
         inlineList: [],
@@ -296,7 +330,7 @@ describe('сериализация', () => {
       itemList: [
         {
           topic: {
-            level1: { title: 'h', idx: null },
+            level1: { title: 'h', idx: 0 },
             level2: null,
             level3: null,
             inlineList: [],
@@ -304,26 +338,44 @@ describe('сериализация', () => {
           text: 'body',
         },
       ],
+      text: null,
     };
     expect(contentToText(content)).toBe('[p:: v]\n# h\nbody');
   });
 });
 
 describe('fd-reply и вложенные скобки', () => {
-  it('адрес [[...]] в значении на строке заголовка парсится целиком', () => {
-    const content = '## Q 1 [fd-reply:: [[#PART 2##CHAPTER 3]]]';
-    const res = textToStructure(content, true);
-    expect(res.itemList[0].topic.inlineList).toEqual([
-      { param: 'fd-reply', valueList: ['[[#PART 2##CHAPTER 3]]'], source: 'heading' },
-    ]);
-  });
-
-  it('fd-reply в теле раздела', () => {
+  it('fd-reply на отдельной строке свойств', () => {
     const content = '## Q 1\n[fd-reply:: [[#PART 2##CHAPTER 3]]]';
     const res = textToStructure(content, true);
     expect(res.itemList[0].topic.inlineList).toEqual([
-      { param: 'fd-reply', valueList: ['[[#PART 2##CHAPTER 3]]'], source: 'body' },
+      { param: 'fd-reply', valueList: ['[[#PART 2##CHAPTER 3]]'], source: 'topic' },
     ]);
+    expect(res.itemList[0].text).toBeNull();
+  });
+
+  it('запятая внутри [[...]] не режет valueList', () => {
+    const content = '[fd-reply:: [[#Итоги, часть 1]], [[#Итоги, часть 2]]]';
+    const res = textToStructure(content, true);
+    expect(res.inlineList).toEqual([
+      { param: 'fd-reply', valueList: ['[[#Итоги, часть 1]]', '[[#Итоги, часть 2]]'] },
+    ]);
+  });
+});
+
+describe('краевые случаи полей', () => {
+  it('незакрытая [ в значении поля — не поле, текст сохраняется', () => {
+    const content = '# h\n[note:: see [broken';
+    const res = textToStructure(content, true);
+    expect(res.itemList[0].topic.inlineList).toEqual([]);
+    expect(res.itemList[0].text).toBe('[note:: see [broken');
+  });
+
+  it('поле в inline-коде (`) не парсится', () => {
+    const content = '# h\n`[par:: val]`';
+    const res = textToStructure(content, true);
+    expect(res.itemList[0].topic.inlineList).toEqual([]);
+    expect(res.itemList[0].text).toBe('`[par:: val]`');
   });
 });
 
@@ -338,16 +390,16 @@ describe('round-trip без дублирования полей', () => {
     expect(contentToText(content)).toBe(src);
   });
 
-  it('topicToText не выводит body-поля', () => {
+  it('topicToText выводит только topic-поля', () => {
     const topic = {
       level1: null,
       level2: { title: 'Q', idx: 1 },
       level3: null,
       inlineList: [
-        { param: 'fd-to', valueList: ['HUMAN.ANALYST'], source: 'heading' as const },
+        { param: 'fd-to', valueList: ['HUMAN.ANALYST'], source: 'topic' as const },
         { param: 'fd-created', valueList: ['x'], source: 'body' as const },
       ],
     };
-    expect(topicToText(topic)).toBe('## Q 1 [fd-to:: HUMAN.ANALYST]');
+    expect(topicToText(topic)).toBe('## Q 1\n[fd-to:: HUMAN.ANALYST]');
   });
 });

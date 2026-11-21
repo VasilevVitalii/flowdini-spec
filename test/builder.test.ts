@@ -7,7 +7,7 @@ describe('builder', () => {
   });
 
   it('newLevel', () => {
-    expect(newLevel()).toEqual({ title: '', idx: null });
+    expect(newLevel()).toEqual({ title: '', idx: 0 });
   });
 
   it('newTopic — все уровни null', () => {
@@ -27,7 +27,7 @@ describe('builder', () => {
   });
 
   it('newContent — пустой', () => {
-    expect(newContent()).toEqual({ inlineList: [], itemList: [] });
+    expect(newContent()).toEqual({ inlineList: [], itemList: [], text: null });
   });
 
   it('фабрики не зависят от this (деструктуризация)', () => {

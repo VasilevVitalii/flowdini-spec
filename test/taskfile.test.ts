@@ -48,6 +48,11 @@ describe('FdTaskFile', () => {
     await expect(tf.write('../outside.md', 'x')).rejects.toThrow('вне каталога');
   });
 
+  it('list несуществующего каталога — отклоняется', async () => {
+    const tf = new FdTaskFile(path.join(root, 'nope'));
+    await expect(tf.list()).rejects.toThrow();
+  });
+
   it('абсолютный путь вне каталога → ошибка', async () => {
     const tf = new FdTaskFile(root);
     await expect(tf.read('/etc/passwd')).rejects.toThrow('вне каталога');

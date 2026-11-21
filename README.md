@@ -18,6 +18,7 @@ for (const file of await files.list()) {
   const text = await files.read(file);
   const content = textToStructure(text, true);
   // content.inlineList  — поля до первого заголовка
+  // content.text        — текст преамбулы (до первого заголовка) без полей; null — нет
   // content.itemList    — записи по заголовкам (topic + text)
 }
 ```
@@ -41,7 +42,7 @@ for (const file of await files.list()) {
 | `textToStructure` | `(text, allowText: boolean): TFdContent` | Парсинг md в структуру. `allowText: false` → `text` везде `null` (тело не накапливается), структура и inline-поля — на месте. |
 | `inlineFieldToText` | `(field): string` | `[param:: v1, v2]`. |
 | `levelToText` | `(level, headingLevel: 1\|2\|3): string` | Заголовок: `### title 2`. |
-| `topicToText` | `(topic): string` | Заголовок самого глубокого заданного уровня + inline-поля в ту же строку. |
+| `topicToText` | `(topic): string` | Заголовок самого глубокого заданного уровня; поля `heading` — в ту же строку, поля `topic` — отдельными строками следом, `body` пропускаются. |
 | `itemToText` | `(item): string` | Заголовок + `\n` + тело (если есть). |
 | `contentToText` | `(content): string` | Преамбула (по строке на поле) + элементы через `\n`. |
 
@@ -54,13 +55,13 @@ for (const file of await files.list()) {
 ```ts
 interface TFdLevel {
   title: string;
-  idx: number | null;   // числовой суффикс заголовка
+  idx: number;   // числовой суффикс заголовка (0 — номера нет)
 }
 
 interface TFdInlineField {
   param: string;
   valueList: string[];
-  source?: 'heading' | 'body';  // откуда поле: строка заголовка или тело раздела
+  source?: 'topic' | 'body';  // отдельная строка свойств / тело раздела
 }
 
 interface TFdTopic {
@@ -78,6 +79,7 @@ interface TFdItem {
 interface TFdContent {
   inlineList: TFdInlineField[];  // преамбула: поля до первого заголовка
   itemList: TFdItem[];
+  text: string | null;           // преамбула: текст до первого заголовка без полей; null — нет
 }
 ```
 
@@ -87,9 +89,9 @@ interface TFdContent {
 
 - ATX-заголовки уровней 1–3; уровень = числу `#`. Уровни 4+ игнорируются.
 - Каждый заголовок создаёт новую запись `itemList`; старший уровень сбрасывает младшие в `null`. Отсутствующие предки — `null`.
-- Заголовок разбивается на `title` + `idx`: если последний whitespace-токен — целое число (со знаком `-`), он уходит в `idx`, остаток — в `title`; иначе `idx: null`, `title` — весь текст.
+- Заголовок разбивается на `title` + `idx`: если последний whitespace-токен — целое число (со знаком `-`), он уходит в `idx`, остаток — в `title`; иначе `idx: 0`, `title` — весь текст.
   - `# question 2` → `{ title: 'question', idx: 2 }`
-  - `# question ` → `{ title: 'question', idx: null }`
+  - `# question ` → `{ title: 'question', idx: 0 }`
   - `# question -1` → `{ title: 'question', idx: -1 }`
   - `# question - 1` → `{ title: 'question -', idx: 1 }`
 - Строки внутри fenced-блока (` ``` ` или `~~~`) не парсятся.
@@ -103,23 +105,26 @@ interface TFdContent {
 - Пустое значение `[par:: ]` → `valueList: []`; пустой `param` — поле пропускается.
 - Несколько полей на одной строке — ок.
 
-### Привязка полей
+### Свойства топика и тело
 
-- Поле привязывается к последнему открытому заголовку.
-- Поля до первого заголовка → верхний `inlineList` (преамбула).
-- Поле на строке заголовка → в новую запись, из текста заголовка вычищается.
-- Поля помечаются `source`: `'heading'` — со строки заголовка, `'body'` — из тела; преамбула — без `source`.
+- После заголовка следующей строкой (а может и не быть) идут одна или несколько строк **свойств топика** — строки, состоящие только из inline-полей (пустые строки между ними допускаются). Они принадлежат топику, а не телу.
+- Первая строка с обычным текстом начинает тело; всё, что дальше (включая строки с полями и fenced-блоки) — тело.
+- Поле привязывается к последнему открытому заголовку; поля до первого заголовка → верхний `inlineList` (преамбула).
+- Поля помечаются `source`:
+  - `'topic'` — на отдельной строке свойств сразу после заголовка;
+  - `'body'` — в теле раздела.
+  Преамбула — без `source`. Поля на строке заголовка не поддерживаются (стали бы частью `title`).
 
 ### Тело раздела (`text`)
 
-- Строки между заголовком и следующим заголовком — тело раздела; сохраняются в `text` сырыми (как есть, включая строки с inline-полями и fenced-блоки).
-- Inline-поля тела дополнительно индексируются в `topic.inlineList` (не вычищаются из `text` — `text` каноничен для обратной сборки).
+- Строки от первой строки с текстом до следующего заголовка — тело; сохраняются в `text` сырыми (как есть, включая строки с inline-полями и fenced-блоки).
+- Поля `topic` в `text` не входят — это свойства топика. Поля `body` индексируются в `topic.inlineList` и остаются в `text` (`text` каноничен для обратной сборки).
 - Пустое тело (только whitespace) → `text: null`.
 - При `allowText: false` тело не накапливается, `text` всегда `null`; поля индексируются как обычно.
 
 ## Сериализация
 
-Собирает структуру обратно в md: `contentToText` → `itemToText` → `topicToText` → `levelToText` / `inlineFieldToText`. `text` сериализуется как есть. Поля `source: 'body'` в заголовок не выводятся (они уже в `text`) — round-trip без дублирования; поля `source: 'heading'` и без `source` идут в строку заголовка.
+Собирает структуру обратно в md: `contentToText` → `itemToText` → `topicToText` → `levelToText` / `inlineFieldToText`. `text` сериализуется как есть. Поля без `source` (преамбула) идут в преамбулу, поля `source: 'topic'` — отдельными строками после заголовка; поля `source: 'body'` не выводятся (они уже в `text`) — round-trip без дублирования.
 
 ## Пример
 
@@ -138,6 +143,7 @@ interface TFdContent {
 ```json
 {
   "inlineList": [],
+  "text": null,
   "itemList": [
     {
       "topic": {
@@ -154,11 +160,11 @@ interface TFdContent {
         "level2": { "title": "chapter", "idx": 2 },
         "level3": null,
         "inlineList": [
-          { "param": "par1", "valueList": ["val1"], "source": "body" },
-          { "param": "par2", "valueList": ["val1", "val2"], "source": "body" }
+          { "param": "par1", "valueList": ["val1"], "source": "topic" },
+          { "param": "par2", "valueList": ["val1", "val2"], "source": "topic" }
         ]
       },
-      "text": "[par1:: val1] [par2:: val1, val2]"
+      "text": null
     },
     {
       "topic": {
@@ -166,10 +172,10 @@ interface TFdContent {
         "level2": { "title": "chapter", "idx": 2 },
         "level3": { "title": "chapter", "idx": 3 },
         "inlineList": [
-          { "param": "par1", "valueList": ["val4", "val5"], "source": "body" }
+          { "param": "par1", "valueList": ["val4", "val5"], "source": "topic" }
         ]
       },
-      "text": "[par1:: val4, val5]"
+      "text": null
     }
   ]
 }

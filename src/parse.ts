@@ -6,14 +6,27 @@ import type {
   TFdTopic,
 } from './types.js';
 
-/** Запятая — разделитель списка, элементы тримятся; запятой в значении быть не может. */
+/**
+ * Запятая — разделитель списка (элементы тримятся). Запятая внутри `[[...]]`
+ * (адрес `fd-reply`) разделителем не считается.
+ */
 function parseValue(raw: string): string[] {
   const value = raw.trim();
   if (value === '') return [];
-  return value
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s !== '');
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i];
+    if (c === '[') depth++;
+    else if (c === ']') depth--;
+    else if (c === ',' && depth === 0) {
+      parts.push(value.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  parts.push(value.slice(start).trim());
+  return parts.filter((s) => s !== '');
 }
 
 interface RawField {
@@ -31,8 +44,19 @@ interface RawField {
 function scanFields(text: string): RawField[] {
   const fields: RawField[] = [];
   let i = 0;
+  let inCode = false;
   while (i < text.length) {
-    if (text[i] !== '[') {
+    const c = text[i];
+    if (c === '`') {
+      inCode = !inCode;
+      i++;
+      continue;
+    }
+    if (inCode) {
+      i++;
+      continue;
+    }
+    if (c !== '[') {
       i++;
       continue;
     }
@@ -57,13 +81,18 @@ function scanFields(text: string): RawField[] {
       else if (text[k] === ']') depth--;
       k++;
     }
+    if (depth > 0) {
+      // Незакрытая скобка — не поле, пропускаем этот '['.
+      i++;
+      continue;
+    }
     fields.push({ param, value: text.slice(j + 2, k - 1), start: i, end: k });
     i = k;
   }
   return fields;
 }
 
-function extractFields(text: string, source?: 'heading' | 'body'): TFdInlineField[] {
+function extractFields(text: string, source?: 'topic' | 'body'): TFdInlineField[] {
   const out: TFdInlineField[] = [];
   for (const f of scanFields(text)) {
     const field: TFdInlineField = { param: f.param, valueList: parseValue(f.value) };
@@ -88,7 +117,7 @@ function stripFields(text: string): string {
 /**
  * Разбор заголовка на title + idx. Если последний whitespace-токен — целое
  * число (со знаком `-`), он становится `idx`, остаток — `title`; иначе
- * `idx: null`, `title` — весь текст.
+ * `idx: 0`, `title` — весь текст.
  */
 function parseLevel(text: string): TFdLevel {
   const trimmed = text.trim();
@@ -96,7 +125,7 @@ function parseLevel(text: string): TFdLevel {
   if (m) {
     return { title: m[1], idx: Number(m[2]) };
   }
-  return { title: trimmed, idx: null };
+  return { title: trimmed, idx: 0 };
 }
 
 const HEADING_RE = /^ {0,3}(#{1,3})(?:[ \t]+(.*))?$/;
@@ -128,13 +157,19 @@ function finishText(bodyLines: string[]): string | null {
 
 /**
  * Парсинг md в структуру. `allowText` управляет телом разделов:
- * `true` — тело сохраняется в `item.text`; `false` — `text` везде `null`
- * (тело не накапливается — когда нужна только структура/навигация).
- * Inline-поля индексируются в `topic.inlineList` в обоих режимах; поля
- * помечаются `source` (`heading` — из строки заголовка, `body` — из тела).
+ * `true` — тело сохраняется в `item.text`; `false` — `text` везде `null`.
+ *
+ * Inline-поля индексируются в `topic.inlineList` в обоих режимах и помечаются
+ * `source` по месту:
+ * - `topic` — на отдельной строке свойств сразу после заголовка (до начала
+ *   тела; такие строки состоят только из полей, пустые строки допускаются);
+ * - `body` — в теле раздела (строка с обычным текстом или после начала тела).
+ *
+ * Поля `topic` не входят в `text` — это свойства топика, а не тело. Поля на
+ * строке заголовка не поддерживаются (стали бы частью `title`).
  */
 export function textToStructure(text: string, allowText: boolean): TFdContent {
-  const result: TFdContent = { inlineList: [], itemList: [] };
+  const result: TFdContent = { inlineList: [], itemList: [], text: null };
   const lines = text.split(/\r?\n/);
 
   let level1: TFdLevel | null = null;
@@ -142,6 +177,8 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
   let level3: TFdLevel | null = null;
   let currentItem: TFdItem | null = null;
   let bodyLines: string[] = [];
+  let preambleLines: string[] = [];
+  let inTopicProps = false;
 
   let inFence = false;
   let fenceChar = '';
@@ -159,6 +196,7 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
       inFence = true;
       fenceChar = open.char;
       fenceLen = open.len;
+      inTopicProps = false; // fenced-блок — это тело
       if (allowText) bodyLines.push(line);
       continue;
     }
@@ -167,9 +205,12 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
     if (heading) {
       if (allowText && currentItem) currentItem.text = finishText(bodyLines);
       bodyLines = [];
+      if (allowText && result.itemList.length === 0) {
+        const preamble = finishText(preambleLines);
+        result.text = preamble === null ? null : preamble.trimEnd();
+      }
 
-      const level = parseLevel(stripFields(heading.text));
-      const fields = extractFields(heading.text, 'heading');
+      const level = parseLevel(heading.text);
       if (heading.level === 1) {
         level1 = level;
         level2 = null;
@@ -181,15 +222,30 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
         level3 = level;
       }
 
-      const topic: TFdTopic = { level1, level2, level3, inlineList: fields };
+      const topic: TFdTopic = { level1, level2, level3, inlineList: [] };
       const item: TFdItem = { topic, text: null };
       result.itemList.push(item);
       currentItem = item;
+      inTopicProps = true;
       continue;
     }
 
-    // Обычная строка: текст только при allowText; поля индексируются всегда.
-    if (allowText) bodyLines.push(line);
+    // Обычная строка.
+    const trimmed = line.trim();
+    if (inTopicProps) {
+      if (trimmed === '') continue; // пустая строка в зоне свойств — разделитель
+      if (scanFields(line).length > 0 && stripFields(line) === '') {
+        // строка целиком из inline-полей → свойства топика (не тело)
+        if (currentItem) currentItem.topic.inlineList.push(...extractFields(line, 'topic'));
+        continue;
+      }
+      inTopicProps = false; // строка содержит текст → начало тела
+    }
+
+    if (allowText) {
+      if (currentItem) bodyLines.push(line);
+      else preambleLines.push(stripFields(line));
+    }
     const fields = currentItem ? extractFields(line, 'body') : extractFields(line);
     if (fields.length > 0) {
       if (currentItem) currentItem.topic.inlineList.push(...fields);
@@ -210,24 +266,24 @@ export function inlineFieldToText(field: TFdInlineField): string {
 
 export function levelToText(level: TFdLevel, headingLevel: 1 | 2 | 3): string {
   const hashes = '#'.repeat(headingLevel);
-  const idx = level.idx === null ? '' : ` ${level.idx}`;
+  const idx = level.idx === 0 ? '' : ` ${level.idx}`;
   return `${hashes} ${level.title}${idx}`;
 }
 
 /**
- * Заголовок самого глубокого заданного уровня + inline-поля (кроме `body` —
- * они уже в `text`) в ту же строку. Пустой топик (все уровни `null`) → `''`.
+ * Заголовок самого глубокого заданного уровня; поля `topic` — отдельными
+ * строками следом, поля `body` пропускаются (они уже в `text`). Пустой
+ * топик → `''`.
  */
 export function topicToText(topic: TFdTopic): string {
   const deepest = topic.level3 ?? topic.level2 ?? topic.level1;
   if (!deepest) return '';
   const headingLevel: 1 | 2 | 3 = topic.level3 ? 3 : topic.level2 ? 2 : 1;
   const head = levelToText(deepest, headingLevel);
-  const fields = topic.inlineList
-    .filter((f) => f.source !== 'body')
-    .map(inlineFieldToText)
-    .join(' ');
-  return fields ? `${head} ${fields}` : head;
+  const topicFields = topic.inlineList
+    .filter((f) => f.source === 'topic')
+    .map(inlineFieldToText);
+  return [head, ...topicFields].join('\n');
 }
 
 export function itemToText(item: TFdItem): string {
@@ -235,9 +291,10 @@ export function itemToText(item: TFdItem): string {
   return item.text === null ? head : `${head}\n${item.text}`;
 }
 
-/** Преамбула (по строке на поле) + элементы, склеенные через `\n`. */
+/** Преамбула (текст, затем поля по строке на поле) + элементы, склеенные через `\n`. */
 export function contentToText(content: TFdContent): string {
   const parts: string[] = [];
+  if (content.text !== null) parts.push(content.text);
   for (const field of content.inlineList) parts.push(inlineFieldToText(field));
   for (const item of content.itemList) parts.push(itemToText(item));
   return parts.join('\n');

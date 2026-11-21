@@ -11,7 +11,7 @@ export function newInlineField(): TFdInlineField {
 }
 
 export function newLevel(): TFdLevel {
-  return { title: '', idx: null };
+  return { title: '', idx: 0 };
 }
 
 export function newTopic(): TFdTopic {
@@ -23,7 +23,7 @@ export function newItem(): TFdItem {
 }
 
 export function newContent(): TFdContent {
-  return { inlineList: [], itemList: [] };
+  return { inlineList: [], itemList: [], text: null };
 }
 
 /** Фабрики пустых структур (без `this` — безопасны при деструктуризации). */

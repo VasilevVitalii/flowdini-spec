@@ -1,14 +1,15 @@
 export interface TFdInlineField {
   param: string;
   valueList: string[];
-  /** Откуда поле: на строке заголовка (`heading`) или в теле раздела (`body`). Нужно сериализатору, чтобы не дублировать поля тела (они уже в `text`). Поля без `source` сериализуются в заголовок. */
-  source?: 'heading' | 'body';
+  /** Откуда поле: `topic` — отдельная строка свойств сразу после заголовка; `body` — в теле раздела (остаётся в `text`); без `source` — преамбула файла. */
+  source?: 'topic' | 'body';
 }
 
 export interface TFdLevel {
   /** Текст заголовка без `idx`. */
   title: string;
-  idx: number | null;
+  /** Числовой суффикс заголовка; `0` — номера нет. */
+  idx: number;
 }
 
 /** Адресуемый узел: заголовки 1–3 уровней + привязанные inline-поля. Без текста. */
@@ -30,4 +31,6 @@ export interface TFdContent {
   /** Преамбула: inline-поля до первого заголовка. */
   inlineList: TFdInlineField[];
   itemList: TFdItem[];
+  /** Текст преамбулы (до первого заголовка) без inline-полей; `null` — текста нет. */
+  text: string | null;
 }
