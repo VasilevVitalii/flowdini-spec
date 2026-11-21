@@ -1,6 +1,6 @@
 # flowdini-spec
 
-Парсер `.md`-файлов для flowdini: заголовки первых трёх уровней и Obsidian Inline Fields (`[param:: value]`). TypeScript, ESM, npm-пакет.
+Низкоуровневая «карта» flowdini: парсер и сериализатор `.md`-файлов (заголовки 1–3 уровней и Obsidian Inline Fields `[param:: value]`) + сырой доступ к файлам. TypeScript, ESM, npm-пакет. Без процесса/ролей/LLM — объект `fd` поверх этих функций собирает `flowdini-engine`.
 
 ## Установка
 
@@ -11,29 +11,43 @@ npm i flowdini-spec
 ## Использование
 
 ```ts
-import { FdMd } from 'flowdini-spec';
+import { FdTaskFile, textToStructure } from 'flowdini-spec';
 
-const fd = new FdMd({ dir: './specs' });
-await fd.scan();
-
-for (const file of fd.getFileList()) {
-  const schema = await fd.getContent(file);
-  // schema.inlineList  — поля до первого заголовка
-  // schema.itemList — записи по заголовкам
+const files = new FdTaskFile('./specs');
+for (const file of await files.list()) {
+  const text = await files.read(file);
+  const content = textToStructure(text, true);
+  // content.inlineList  — поля до первого заголовка
+  // content.itemList    — записи по заголовкам (topic + text)
 }
 ```
 
-Низкоуровневый парсинг строки: `parseMarkdown(content)` (тот же `TFdContent`).
-
 ## API
+
+### `FdTaskFile` — сырой доступ к файлам
 
 | Метод | Сигнатура | Описание |
 |---|---|---|
-| `scan` | `async scan(): Promise<void>` | Рекурсивно обходит `dir`, формирует список файлов; повторный вызов сбрасывает кэш. |
-| `getFileList` | `getFileList(): string[]` | Относительные пути от `dir`, разделитель `/`, лексикографический порядок. |
-| `getContent` | `async getContent(fileItem): Promise<TFdContent>` | Контент файла (элемент `getFileList`), кэш по `mtime + size`. |
+| `list` | `async list(): Promise<string[]>` | Рекурсивный обход `.md`-файлов (скрытые пропускаются), пути относительно каталога, разделитель `/`, сортировка. |
+| `read` | `async read(file): Promise<string>` | Сырое содержимое файла. |
+| `write` | `async write(file, text): Promise<void>` | Запись; создаёт родительские каталоги при необходимости. |
 
-Конструктор: `new FdMd({ dir, filter? })`, где `filter: { list: string[], action: 'allow' | 'deny' }`.
+Конструктор: `new FdTaskFile(taskDir)`.
+
+### `parser` — текст ↔ структура
+
+| Функция | Сигнатура | Описание |
+|---|---|---|
+| `textToStructure` | `(text, allowText: boolean): TFdContent` | Парсинг md в структуру. `allowText: false` → `text` везде `null` (тело не накапливается), структура и inline-поля — на месте. |
+| `inlineFieldToText` | `(field): string` | `[param:: v1, v2]`. |
+| `levelToText` | `(level, headingLevel: 1\|2\|3): string` | Заголовок: `### title 2`. |
+| `topicToText` | `(topic): string` | Заголовок самого глубокого заданного уровня + inline-поля в ту же строку. |
+| `itemToText` | `(item): string` | Заголовок + `\n` + тело (если есть). |
+| `contentToText` | `(content): string` | Преамбула (по строке на поле) + элементы через `\n`. |
+
+### `builder` — фабрики пустых структур
+
+`newInlineField()`, `newLevel()`, `newTopic()`, `newItem()`, `newContent()` — и объект `builder` с теми же функциями (без `this`, безопасны при деструктуризации).
 
 ## Типы
 
@@ -48,21 +62,21 @@ interface TFdInlineField {
   valueList: string[];
 }
 
-interface TFdContentTopic {
+interface TFdTopic {
   level1: TFdLevel | null;
   level2: TFdLevel | null;
   level3: TFdLevel | null;
   inlineList: TFdInlineField[];
 }
 
-interface TFdContentItem {
-  topic: TFdContentTopic;
-  text?: string;            // тело раздела (сырой текст), отсутствует если пусто
+interface TFdItem {
+  topic: TFdTopic;
+  text: string | null;  // тело раздела (сырой текст), null — тела нет
 }
 
 interface TFdContent {
   inlineList: TFdInlineField[];  // преамбула: поля до первого заголовка
-  itemList: TFdContentItem[];
+  itemList: TFdItem[];
 }
 ```
 
@@ -97,18 +111,12 @@ interface TFdContent {
 
 - Строки между заголовком и следующим заголовком — тело раздела; сохраняются в `text` сырыми (как есть, включая строки с inline-полями и fenced-блоки).
 - Inline-поля тела дополнительно индексируются в `topic.inlineList` (не вычищаются из `text` — `text` каноничен для обратной сборки).
-- Пустое тело (только whitespace) → `text` отсутствует (`undefined`).
+- Пустое тело (только whitespace) → `text: null`.
+- При `allowText: false` тело не накапливается, `text` всегда `null`; поля индексируются как обычно.
 
-## Фильтр
+## Сериализация
 
-- Дефолт — все `*.md` рекурсивно (`**/*.md`).
-- Матчинг micromatch против относительного пути (разделитель `/`), регистрозависимый: `*` не пересекает `/`, `**` пересекает. `111.md` — только корень, `**/*2.md` — любая глубина.
-- `allow` — оставить подходящие; `deny` — исключить подходящие.
-
-## Кэш и ошибки
-
-- Кэш по `mtime + size`; без изменений файл не перечитывается.
-- Ошибка чтения/парсинга → пустой контент `{ inlineList: [], itemList: [] }`, кэш для файла сбрасывается.
+Собирает структуру обратно в md: `contentToText` → `itemToText` → `topicToText` → `levelToText` / `inlineFieldToText`. `text` сериализуется как есть. Точный round-trip исходного форматирования (пробелы, положение поля в теле vs в заголовке) не гарантируется: inline-поля `topic.inlineList` выводятся в строку заголовка.
 
 ## Пример
 
@@ -122,7 +130,7 @@ interface TFdContent {
 [par1:: val4, val5]
 ```
 
-Выход (`getContent`):
+Выход (`textToStructure(text, true)`):
 
 ```json
 {
@@ -134,7 +142,8 @@ interface TFdContent {
         "level2": null,
         "level3": null,
         "inlineList": []
-      }
+      },
+      "text": null
     },
     {
       "topic": {

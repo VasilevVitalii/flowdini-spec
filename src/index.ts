@@ -1,11 +1,24 @@
-export { FdMd } from './FdMd.js';
-export { parseMarkdown } from './parse.js';
+export { FdTaskFile } from './FdTaskFile.js';
+export {
+  textToStructure,
+  inlineFieldToText,
+  levelToText,
+  topicToText,
+  itemToText,
+  contentToText,
+} from './parse.js';
+export {
+  builder,
+  newInlineField,
+  newLevel,
+  newTopic,
+  newItem,
+  newContent,
+} from './builder.js';
 export type {
   TFdContent,
-  TFdContentItem,
-  TFdContentTopic,
-  TFdInlineField,
+  TFdItem,
+  TFdTopic,
   TFdLevel,
-  FdMdParams,
-  FdMdFilter,
+  TFdInlineField,
 } from './types.js';

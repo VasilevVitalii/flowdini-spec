@@ -4,40 +4,49 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { parseMarkdown, FdMd } from '../dist/index.js';
+import { textToStructure, FdTaskFile, levelToText } from '../dist/index.js';
 
-// parseMarkdown: title + idx
+// textToStructure: title + idx
 assert.deepStrictEqual(
-  parseMarkdown('# question 2').itemList[0].topic.level1,
+  textToStructure('# question 2', true).itemList[0].topic.level1,
   { title: 'question', idx: 2 },
 );
 assert.deepStrictEqual(
-  parseMarkdown('# question - 1').itemList[0].topic.level1,
+  textToStructure('# question - 1', true).itemList[0].topic.level1,
   { title: 'question -', idx: 1 },
 );
 
 // inline fields: запятая — разделитель списка
-assert.deepStrictEqual(parseMarkdown('[par:: a, b]').inlineList, [
+assert.deepStrictEqual(textToStructure('[par:: a, b]', true).inlineList, [
   { param: 'par', valueList: ['a', 'b'] },
 ]);
 
-// FdMd: scan / getFileList / getContent
+// allowText: false → text всегда null
+assert.deepStrictEqual(textToStructure('# h\nbody', false).itemList[0].text, null);
+
+// сериализация: levelToText
+assert.deepStrictEqual(levelToText({ title: 'chapter', idx: 2 }, 1), '# chapter 2');
+
+// FdTaskFile: list / read / write
 const root = await mkdtemp(path.join(tmpdir(), 'flowdini-smoke-'));
 try {
   await writeFile(path.join(root, 'a.md'), '# chapter 1');
   await mkdir(path.join(root, 'sub'));
   await writeFile(path.join(root, 'sub', 'b.md'), '[p:: v]\n## chapter 2');
 
-  const fd = new FdMd({ dir: root });
-  await fd.scan();
-  assert.deepStrictEqual(fd.getFileList(), ['a.md', 'sub/b.md']);
+  const tf = new FdTaskFile(root);
+  assert.deepStrictEqual(await tf.list(), ['a.md', 'sub/b.md']);
 
-  const schema = await fd.getContent('sub/b.md');
+  const text = await tf.read('sub/b.md');
+  const schema = textToStructure(text, true);
   assert.deepStrictEqual(schema.inlineList, [{ param: 'p', valueList: ['v'] }]);
   assert.deepStrictEqual(schema.itemList[0].topic.level2, {
     title: 'chapter',
     idx: 2,
   });
+
+  await tf.write('sub/c.md', '# chapter 3');
+  assert.deepStrictEqual(await tf.read('sub/c.md'), '# chapter 3');
 } finally {
   await rm(root, { recursive: true, force: true });
 }

@@ -1,9 +1,9 @@
 import type {
   TFdContent,
-  TFdContentItem,
-  TFdContentTopic,
   TFdInlineField,
+  TFdItem,
   TFdLevel,
+  TFdTopic,
 } from './types.js';
 
 /** Inline-поле `[param:: value]`: разделитель — первое `::`, значение без `[`/`]`. */
@@ -51,12 +51,7 @@ function parseLevel(text: string): TFdLevel {
 
 const HEADING_RE = /^ {0,3}(#{1,3})(?:[ \t]+(.*))?$/;
 
-interface HeadingMatch {
-  level: 1 | 2 | 3;
-  text: string;
-}
-
-function matchHeading(line: string): HeadingMatch | null {
+function matchHeading(line: string): { level: 1 | 2 | 3; text: string } | null {
   const m = HEADING_RE.exec(line);
   if (!m) return null;
   return { level: m[1].length as 1 | 2 | 3, text: m[2] ?? '' };
@@ -64,12 +59,7 @@ function matchHeading(line: string): HeadingMatch | null {
 
 const OPEN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 
-interface FenceOpen {
-  char: string;
-  len: number;
-}
-
-function openFence(line: string): FenceOpen | null {
+function openFence(line: string): { char: string; len: number } | null {
   const m = OPEN_FENCE_RE.exec(line);
   if (!m) return null;
   return { char: m[1][0], len: m[1].length };
@@ -80,20 +70,26 @@ function isClosingFence(line: string, char: string, len: number): boolean {
   return re.test(line);
 }
 
-/** Пустое тело (только whitespace) не сохраняется — `text` остаётся отсутствующим. */
-function finishText(bodyLines: string[]): string | undefined {
+/** Пустое тело (только whitespace) → `null`. */
+function finishText(bodyLines: string[]): string | null {
   const text = bodyLines.join('\n');
-  return text.trim() === '' ? undefined : text;
+  return text.trim() === '' ? null : text;
 }
 
-export function parseMarkdown(content: string): TFdContent {
+/**
+ * Парсинг md в структуру. `allowText` управляет телом разделов:
+ * `true` — тело сохраняется в `item.text`; `false` — `text` везде `null`
+ * (тело не накапливается — когда нужна только структура/навигация).
+ * Inline-поля индексируются в `topic.inlineList` в обоих режимах.
+ */
+export function textToStructure(text: string, allowText: boolean): TFdContent {
   const result: TFdContent = { inlineList: [], itemList: [] };
-  const lines = content.split(/\r?\n/);
+  const lines = text.split(/\r?\n/);
 
   let level1: TFdLevel | null = null;
   let level2: TFdLevel | null = null;
   let level3: TFdLevel | null = null;
-  let currentItem: TFdContentItem | null = null;
+  let currentItem: TFdItem | null = null;
   let bodyLines: string[] = [];
 
   let inFence = false;
@@ -102,8 +98,7 @@ export function parseMarkdown(content: string): TFdContent {
 
   for (const line of lines) {
     if (inFence) {
-      // Fenced-блок — литерал: строки идут в тело раздела как есть.
-      bodyLines.push(line);
+      if (allowText) bodyLines.push(line);
       if (isClosingFence(line, fenceChar, fenceLen)) inFence = false;
       continue;
     }
@@ -113,13 +108,13 @@ export function parseMarkdown(content: string): TFdContent {
       inFence = true;
       fenceChar = open.char;
       fenceLen = open.len;
-      bodyLines.push(line);
+      if (allowText) bodyLines.push(line);
       continue;
     }
 
     const heading = matchHeading(line);
     if (heading) {
-      if (currentItem) currentItem.text = finishText(bodyLines);
+      if (allowText && currentItem) currentItem.text = finishText(bodyLines);
       bodyLines = [];
 
       const level = parseLevel(stripFields(heading.text));
@@ -135,15 +130,15 @@ export function parseMarkdown(content: string): TFdContent {
         level3 = level;
       }
 
-      const topic: TFdContentTopic = { level1, level2, level3, inlineList: fields };
-      const item: TFdContentItem = { topic };
+      const topic: TFdTopic = { level1, level2, level3, inlineList: fields };
+      const item: TFdItem = { topic, text: null };
       result.itemList.push(item);
       currentItem = item;
       continue;
     }
 
-    // Обычная строка тела: сохраняется в text; inline-поля дополнительно индексируются.
-    bodyLines.push(line);
+    // Обычная строка тела: текст только при allowText; поля индексируются всегда.
+    if (allowText) bodyLines.push(line);
     const fields = extractFields(line);
     if (fields.length > 0) {
       if (currentItem) currentItem.topic.inlineList.push(...fields);
@@ -151,7 +146,45 @@ export function parseMarkdown(content: string): TFdContent {
     }
   }
 
-  if (currentItem) currentItem.text = finishText(bodyLines);
+  if (allowText && currentItem) currentItem.text = finishText(bodyLines);
 
   return result;
+}
+
+// ---- Сериализация (структура → текст) ----
+
+export function inlineFieldToText(field: TFdInlineField): string {
+  return `[${field.param}:: ${field.valueList.join(', ')}]`;
+}
+
+export function levelToText(level: TFdLevel, headingLevel: 1 | 2 | 3): string {
+  const hashes = '#'.repeat(headingLevel);
+  const idx = level.idx === null ? '' : ` ${level.idx}`;
+  return `${hashes} ${level.title}${idx}`;
+}
+
+/**
+ * Заголовок самого глубокого заданного уровня + inline-поля в ту же строку.
+ * Пустой топик (все уровни `null`) → `''`.
+ */
+export function topicToText(topic: TFdTopic): string {
+  const deepest = topic.level3 ?? topic.level2 ?? topic.level1;
+  if (!deepest) return '';
+  const headingLevel: 1 | 2 | 3 = topic.level3 ? 3 : topic.level2 ? 2 : 1;
+  const head = levelToText(deepest, headingLevel);
+  const fields = topic.inlineList.map(inlineFieldToText).join(' ');
+  return fields ? `${head} ${fields}` : head;
+}
+
+export function itemToText(item: TFdItem): string {
+  const head = topicToText(item.topic);
+  return item.text === null ? head : `${head}\n${item.text}`;
+}
+
+/** Преамбула (по строке на поле) + элементы, склеенные через `\n`. */
+export function contentToText(content: TFdContent): string {
+  const parts: string[] = [];
+  for (const field of content.inlineList) parts.push(inlineFieldToText(field));
+  for (const item of content.itemList) parts.push(itemToText(item));
+  return parts.join('\n');
 }

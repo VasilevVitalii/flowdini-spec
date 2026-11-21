@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { parseMarkdown } from '../src/parse.js';
+import {
+  contentToText,
+  inlineFieldToText,
+  itemToText,
+  levelToText,
+  textToStructure,
+  topicToText,
+} from '../src/parse.js';
 
-describe('parseMarkdown', () => {
+describe('textToStructure (allowText: true)', () => {
   it('базовый пример из спеки', () => {
     const content = [
       '# chapter 1',
@@ -11,7 +18,7 @@ describe('parseMarkdown', () => {
       '[par1:: val4, val5]',
     ].join('\n');
 
-    expect(parseMarkdown(content)).toEqual({
+    expect(textToStructure(content, true)).toEqual({
       inlineList: [],
       itemList: [
         {
@@ -21,6 +28,7 @@ describe('parseMarkdown', () => {
             level3: null,
             inlineList: [],
           },
+          text: null,
         },
         {
           topic: {
@@ -49,7 +57,7 @@ describe('parseMarkdown', () => {
 
   it('преамбула: поля до первого заголовка', () => {
     const content = '[p:: v]\n# h1';
-    expect(parseMarkdown(content)).toEqual({
+    expect(textToStructure(content, true)).toEqual({
       inlineList: [{ param: 'p', valueList: ['v'] }],
       itemList: [
         {
@@ -59,6 +67,7 @@ describe('parseMarkdown', () => {
             level3: null,
             inlineList: [],
           },
+          text: null,
         },
       ],
     });
@@ -66,32 +75,34 @@ describe('parseMarkdown', () => {
 
   it('### без предков → level1/level2 null', () => {
     const content = '### chapter 3';
-    expect(parseMarkdown(content).itemList[0]).toEqual({
+    expect(textToStructure(content, true).itemList[0]).toEqual({
       topic: {
         level1: null,
         level2: null,
         level3: { title: 'chapter', idx: 3 },
         inlineList: [],
       },
+      text: null,
     });
   });
 
   it('поле на строке заголовка → в topic, из текста заголовка вычищается', () => {
     const content = '# chapter 1\n## chapter 2 [par:: val]';
-    const schema = parseMarkdown(content);
-    expect(schema.itemList[1]).toEqual({
+    const res = textToStructure(content, true);
+    expect(res.itemList[1]).toEqual({
       topic: {
         level1: { title: 'chapter', idx: 1 },
         level2: { title: 'chapter', idx: 2 },
         level3: null,
         inlineList: [{ param: 'par', valueList: ['val'] }],
       },
+      text: null,
     });
   });
 
   it('текст тела сохраняется в text', () => {
     const content = '# h\nline one\nline two';
-    expect(parseMarkdown(content).itemList[0]).toEqual({
+    expect(textToStructure(content, true).itemList[0]).toEqual({
       topic: {
         level1: { title: 'h', idx: null },
         level2: null,
@@ -102,9 +113,9 @@ describe('parseMarkdown', () => {
     });
   });
 
-  it('пустое тело → text отсутствует', () => {
+  it('пустое тело → text: null', () => {
     const content = '# h\n\n## next';
-    expect(parseMarkdown(content).itemList[0].text).toBeUndefined();
+    expect(textToStructure(content, true).itemList[0].text).toBeNull();
   });
 
   it('fenced-блок: заголовки и поля внутри не парсятся, но идут в text', () => {
@@ -116,47 +127,47 @@ describe('parseMarkdown', () => {
       '```',
       'tail',
     ].join('\n');
-    const schema = parseMarkdown(content);
-    expect(schema.inlineList).toEqual([]);
-    expect(schema.itemList[0].topic.inlineList).toEqual([]);
-    expect(schema.itemList[0].text).toBe('```\n# not a heading\n[par:: val]\n```\ntail');
+    const res = textToStructure(content, true);
+    expect(res.inlineList).toEqual([]);
+    expect(res.itemList[0].topic.inlineList).toEqual([]);
+    expect(res.itemList[0].text).toBe('```\n# not a heading\n[par:: val]\n```\ntail');
   });
 
   it('одиночный : в значении не разваливает', () => {
     const content = '[fd-from:: AI:Architect]';
-    expect(parseMarkdown(content).inlineList).toEqual([
+    expect(textToStructure(content, true).inlineList).toEqual([
       { param: 'fd-from', valueList: ['AI:Architect'] },
     ]);
   });
 
   it('сплит значения по запятой', () => {
     const content = '[par:: val1, val2]';
-    expect(parseMarkdown(content).inlineList).toEqual([
+    expect(textToStructure(content, true).inlineList).toEqual([
       { param: 'par', valueList: ['val1', 'val2'] },
     ]);
   });
 
   it('уровни 4+ не создают раздел, строка уходит в text предыдущего', () => {
     const content = '# a\n#### deep\n## b';
-    const schema = parseMarkdown(content);
-    expect(schema.itemList.map((c) => c.topic.level2)).toEqual([
+    const res = textToStructure(content, true);
+    expect(res.itemList.map((c) => c.topic.level2)).toEqual([
       null,
       { title: 'b', idx: null },
     ]);
-    expect(schema.itemList[0].text).toBe('#### deep');
+    expect(res.itemList[0].text).toBe('#### deep');
   });
 
   it('CRLF-переносы обрабатываются', () => {
     const content = '# a\r\n## b\r\n[par:: val]';
-    const schema = parseMarkdown(content);
-    expect(schema.itemList[1].topic.inlineList).toEqual([
+    const res = textToStructure(content, true);
+    expect(res.itemList[1].topic.inlineList).toEqual([
       { param: 'par', valueList: ['val'] },
     ]);
   });
 
   it('пустое значение → valueList: []', () => {
     const content = '[par:: ]';
-    expect(parseMarkdown(content).inlineList).toEqual([
+    expect(textToStructure(content, true).inlineList).toEqual([
       { param: 'par', valueList: [] },
     ]);
   });
@@ -164,7 +175,7 @@ describe('parseMarkdown', () => {
   describe('разбор title + idx', () => {
     it('# question 2 → title "question", idx 2', () => {
       const content = '# question 2';
-      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
+      expect(textToStructure(content, true).itemList[0].topic.level1).toEqual({
         title: 'question',
         idx: 2,
       });
@@ -172,7 +183,7 @@ describe('parseMarkdown', () => {
 
     it('# question  (пробел в конце) → title "question", idx null', () => {
       const content = '# question ';
-      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
+      expect(textToStructure(content, true).itemList[0].topic.level1).toEqual({
         title: 'question',
         idx: null,
       });
@@ -180,7 +191,7 @@ describe('parseMarkdown', () => {
 
     it('# question -1 → title "question", idx -1', () => {
       const content = '# question -1';
-      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
+      expect(textToStructure(content, true).itemList[0].topic.level1).toEqual({
         title: 'question',
         idx: -1,
       });
@@ -188,7 +199,7 @@ describe('parseMarkdown', () => {
 
     it('# question - 1 → title "question -", idx 1', () => {
       const content = '# question - 1';
-      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
+      expect(textToStructure(content, true).itemList[0].topic.level1).toEqual({
         title: 'question -',
         idx: 1,
       });
@@ -196,10 +207,104 @@ describe('parseMarkdown', () => {
 
     it('без числа → idx null', () => {
       const content = '# intro';
-      expect(parseMarkdown(content).itemList[0].topic.level1).toEqual({
+      expect(textToStructure(content, true).itemList[0].topic.level1).toEqual({
         title: 'intro',
         idx: null,
       });
     });
+  });
+});
+
+describe('textToStructure (allowText: false)', () => {
+  it('text везде null, но структура и inline-поля на месте', () => {
+    const content = '# h\n[par:: val]\nbody line\n## h2';
+    const res = textToStructure(content, false);
+    expect(res.itemList).toHaveLength(2);
+    expect(res.itemList[0].text).toBeNull();
+    expect(res.itemList[0].topic.inlineList).toEqual([
+      { param: 'par', valueList: ['val'] },
+    ]);
+    expect(res.itemList[1].text).toBeNull();
+  });
+
+  it('преамбула индексируется и без текста', () => {
+    const content = '[p:: v]\n# h';
+    const res = textToStructure(content, false);
+    expect(res.inlineList).toEqual([{ param: 'p', valueList: ['v'] }]);
+    expect(res.itemList[0].text).toBeNull();
+  });
+});
+
+describe('сериализация', () => {
+  it('inlineFieldToText', () => {
+    expect(inlineFieldToText({ param: 'par', valueList: ['a', 'b'] })).toBe(
+      '[par:: a, b]',
+    );
+  });
+
+  it('levelToText: idx в конец', () => {
+    expect(levelToText({ title: 'chapter', idx: 2 }, 1)).toBe('# chapter 2');
+  });
+
+  it('levelToText: без idx', () => {
+    expect(levelToText({ title: 'chapter', idx: null }, 3)).toBe('### chapter');
+  });
+
+  it('topicToText: самый глубокий уровень + поля в ту же строку', () => {
+    const topic = {
+      level1: { title: 'chapter', idx: 1 },
+      level2: { title: 'chapter', idx: 2 },
+      level3: null,
+      inlineList: [{ param: 'par', valueList: ['val'] }],
+    };
+    expect(topicToText(topic)).toBe('## chapter 2 [par:: val]');
+  });
+
+  it('topicToText: пустой топик → пустая строка', () => {
+    expect(topicToText({ level1: null, level2: null, level3: null, inlineList: [] })).toBe('');
+  });
+
+  it('itemToText: заголовок + текст через перенос', () => {
+    const item = {
+      topic: {
+        level1: { title: 'h', idx: null },
+        level2: null,
+        level3: null,
+        inlineList: [],
+      },
+      text: 'line one\nline two',
+    };
+    expect(itemToText(item)).toBe('# h\nline one\nline two');
+  });
+
+  it('itemToText: без текста — только заголовок', () => {
+    const item = {
+      topic: {
+        level1: { title: 'h', idx: null },
+        level2: null,
+        level3: null,
+        inlineList: [],
+      },
+      text: null,
+    };
+    expect(itemToText(item)).toBe('# h');
+  });
+
+  it('contentToText: преамбула + элементы', () => {
+    const content = {
+      inlineList: [{ param: 'p', valueList: ['v'] }],
+      itemList: [
+        {
+          topic: {
+            level1: { title: 'h', idx: null },
+            level2: null,
+            level3: null,
+            inlineList: [],
+          },
+          text: 'body',
+        },
+      ],
+    };
+    expect(contentToText(content)).toBe('[p:: v]\n# h\nbody');
   });
 });
