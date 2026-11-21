@@ -36,8 +36,8 @@ describe('textToStructure (allowText: true)', () => {
             level2: { title: 'chapter', idx: 2 },
             level3: null,
             inlineList: [
-              { param: 'par1', valueList: ['val1'] },
-              { param: 'par2', valueList: ['val1', 'val2'] },
+              { param: 'par1', valueList: ['val1'], source: 'body' },
+              { param: 'par2', valueList: ['val1', 'val2'], source: 'body' },
             ],
           },
           text: '[par1:: val1] [par2:: val1, val2]',
@@ -47,7 +47,7 @@ describe('textToStructure (allowText: true)', () => {
             level1: { title: 'chapter', idx: 1 },
             level2: { title: 'chapter', idx: 2 },
             level3: { title: 'chapter', idx: 3 },
-            inlineList: [{ param: 'par1', valueList: ['val4', 'val5'] }],
+            inlineList: [{ param: 'par1', valueList: ['val4', 'val5'], source: 'body' }],
           },
           text: '[par1:: val4, val5]',
         },
@@ -94,7 +94,7 @@ describe('textToStructure (allowText: true)', () => {
         level1: { title: 'chapter', idx: 1 },
         level2: { title: 'chapter', idx: 2 },
         level3: null,
-        inlineList: [{ param: 'par', valueList: ['val'] }],
+        inlineList: [{ param: 'par', valueList: ['val'], source: 'heading' }],
       },
       text: null,
     });
@@ -161,7 +161,7 @@ describe('textToStructure (allowText: true)', () => {
     const content = '# a\r\n## b\r\n[par:: val]';
     const res = textToStructure(content, true);
     expect(res.itemList[1].topic.inlineList).toEqual([
-      { param: 'par', valueList: ['val'] },
+      { param: 'par', valueList: ['val'], source: 'body' },
     ]);
   });
 
@@ -222,7 +222,7 @@ describe('textToStructure (allowText: false)', () => {
     expect(res.itemList).toHaveLength(2);
     expect(res.itemList[0].text).toBeNull();
     expect(res.itemList[0].topic.inlineList).toEqual([
-      { param: 'par', valueList: ['val'] },
+      { param: 'par', valueList: ['val'], source: 'body' },
     ]);
     expect(res.itemList[1].text).toBeNull();
   });
@@ -306,5 +306,48 @@ describe('сериализация', () => {
       ],
     };
     expect(contentToText(content)).toBe('[p:: v]\n# h\nbody');
+  });
+});
+
+describe('fd-reply и вложенные скобки', () => {
+  it('адрес [[...]] в значении на строке заголовка парсится целиком', () => {
+    const content = '## Q 1 [fd-reply:: [[#PART 2##CHAPTER 3]]]';
+    const res = textToStructure(content, true);
+    expect(res.itemList[0].topic.inlineList).toEqual([
+      { param: 'fd-reply', valueList: ['[[#PART 2##CHAPTER 3]]'], source: 'heading' },
+    ]);
+  });
+
+  it('fd-reply в теле раздела', () => {
+    const content = '## Q 1\n[fd-reply:: [[#PART 2##CHAPTER 3]]]';
+    const res = textToStructure(content, true);
+    expect(res.itemList[0].topic.inlineList).toEqual([
+      { param: 'fd-reply', valueList: ['[[#PART 2##CHAPTER 3]]'], source: 'body' },
+    ]);
+  });
+});
+
+describe('round-trip без дублирования полей', () => {
+  it('поля тела остаются в text и не поднимаются в заголовок', () => {
+    const src = [
+      '## Q 1 [fd-from:: AI.ARCHITECT] [fd-to:: HUMAN.ANALYST]',
+      '[fd-created:: 2026-11-14T10:30]',
+      'Как бизнес-процесс обрабатывает возвраты?',
+    ].join('\n');
+    const content = textToStructure(src, true);
+    expect(contentToText(content)).toBe(src);
+  });
+
+  it('topicToText не выводит body-поля', () => {
+    const topic = {
+      level1: null,
+      level2: { title: 'Q', idx: 1 },
+      level3: null,
+      inlineList: [
+        { param: 'fd-to', valueList: ['HUMAN.ANALYST'], source: 'heading' as const },
+        { param: 'fd-created', valueList: ['x'], source: 'body' as const },
+      ],
+    };
+    expect(topicToText(topic)).toBe('## Q 1 [fd-to:: HUMAN.ANALYST]');
   });
 });

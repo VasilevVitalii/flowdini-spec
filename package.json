@@ -1,6 +1,6 @@
 {
   "name": "flowdini-spec",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Markdown parser for flowdini specs: headings (levels 1-3) and Obsidian inline fields",
   "type": "module",
   "main": "./dist/index.js",

@@ -18,14 +18,27 @@ export class FdTaskFile {
   }
 
   async read(relativeFileName: string): Promise<string> {
-    return fs.readFile(path.resolve(this.dir, relativeFileName), 'utf8');
+    return fs.readFile(this.resolve(relativeFileName), 'utf8');
   }
 
   /** Создаёт родительские каталоги при необходимости. */
   async write(relativeFileName: string, text: string): Promise<void> {
-    const fullPath = path.resolve(this.dir, relativeFileName);
+    const fullPath = this.resolve(relativeFileName);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, text, 'utf8');
+  }
+
+  /**
+   * Абсолютный путь строго внутри каталога задачи. Путь с `..` или абсолютный,
+   * выходящий за `dir`, отклоняется — защита от выхода за границы каталога.
+   */
+  private resolve(relativeFileName: string): string {
+    const full = path.resolve(this.dir, relativeFileName);
+    const rel = path.relative(this.dir, full);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(`Путь вне каталога задачи: ${relativeFileName}`);
+    }
+    return full;
   }
 
   private async walk(dir: string): Promise<string[]> {

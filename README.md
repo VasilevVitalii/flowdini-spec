@@ -29,8 +29,8 @@ for (const file of await files.list()) {
 | Метод | Сигнатура | Описание |
 |---|---|---|
 | `list` | `async list(): Promise<string[]>` | Рекурсивный обход `.md`-файлов (скрытые пропускаются), пути относительно каталога, разделитель `/`, сортировка. |
-| `read` | `async read(file): Promise<string>` | Сырое содержимое файла. |
-| `write` | `async write(file, text): Promise<void>` | Запись; создаёт родительские каталоги при необходимости. |
+| `read` | `async read(file): Promise<string>` | Сырое содержимое файла. Путь вне каталога задачи (`..`, абсолютный) отклоняется. |
+| `write` | `async write(file, text): Promise<void>` | Запись; создаёт родительские каталоги при необходимости. Путь вне каталога задачи отклоняется. |
 
 Конструктор: `new FdTaskFile(taskDir)`.
 
@@ -60,6 +60,7 @@ interface TFdLevel {
 interface TFdInlineField {
   param: string;
   valueList: string[];
+  source?: 'heading' | 'body';  // откуда поле: строка заголовка или тело раздела
 }
 
 interface TFdTopic {
@@ -98,6 +99,7 @@ interface TFdContent {
 - Формат `[param:: value]`; разделитель — **первое** `::`, обе части тримятся.
 - Запятая — разделитель списка значений (запятой в значении быть не может).
 - Одиночный `:` в значении допустим: `[fd-from:: AI:Architect]`.
+- Значение может содержать вложенные скобки `[[...]]` (адрес `fd-reply`): `[fd-reply:: [[#PART 2##CHAPTER 3]]]`.
 - Пустое значение `[par:: ]` → `valueList: []`; пустой `param` — поле пропускается.
 - Несколько полей на одной строке — ок.
 
@@ -106,6 +108,7 @@ interface TFdContent {
 - Поле привязывается к последнему открытому заголовку.
 - Поля до первого заголовка → верхний `inlineList` (преамбула).
 - Поле на строке заголовка → в новую запись, из текста заголовка вычищается.
+- Поля помечаются `source`: `'heading'` — со строки заголовка, `'body'` — из тела; преамбула — без `source`.
 
 ### Тело раздела (`text`)
 
@@ -116,7 +119,7 @@ interface TFdContent {
 
 ## Сериализация
 
-Собирает структуру обратно в md: `contentToText` → `itemToText` → `topicToText` → `levelToText` / `inlineFieldToText`. `text` сериализуется как есть. Точный round-trip исходного форматирования (пробелы, положение поля в теле vs в заголовке) не гарантируется: inline-поля `topic.inlineList` выводятся в строку заголовка.
+Собирает структуру обратно в md: `contentToText` → `itemToText` → `topicToText` → `levelToText` / `inlineFieldToText`. `text` сериализуется как есть. Поля `source: 'body'` в заголовок не выводятся (они уже в `text`) — round-trip без дублирования; поля `source: 'heading'` и без `source` идут в строку заголовка.
 
 ## Пример
 
@@ -151,8 +154,8 @@ interface TFdContent {
         "level2": { "title": "chapter", "idx": 2 },
         "level3": null,
         "inlineList": [
-          { "param": "par1", "valueList": ["val1"] },
-          { "param": "par2", "valueList": ["val1", "val2"] }
+          { "param": "par1", "valueList": ["val1"], "source": "body" },
+          { "param": "par2", "valueList": ["val1", "val2"], "source": "body" }
         ]
       },
       "text": "[par1:: val1] [par2:: val1, val2]"
@@ -163,7 +166,7 @@ interface TFdContent {
         "level2": { "title": "chapter", "idx": 2 },
         "level3": { "title": "chapter", "idx": 3 },
         "inlineList": [
-          { "param": "par1", "valueList": ["val4", "val5"] }
+          { "param": "par1", "valueList": ["val4", "val5"], "source": "body" }
         ]
       },
       "text": "[par1:: val4, val5]"

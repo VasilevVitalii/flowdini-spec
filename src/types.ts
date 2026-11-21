@@ -1,6 +1,8 @@
 export interface TFdInlineField {
   param: string;
   valueList: string[];
+  /** Откуда поле: на строке заголовка (`heading`) или в теле раздела (`body`). Нужно сериализатору, чтобы не дублировать поля тела (они уже в `text`). Поля без `source` сериализуются в заголовок. */
+  source?: 'heading' | 'body';
 }
 
 export interface TFdLevel {

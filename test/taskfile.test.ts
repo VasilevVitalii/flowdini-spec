@@ -37,4 +37,19 @@ describe('FdTaskFile', () => {
     await tf.write('sub/deep/b.md', '# b');
     expect(await readFile(path.join(root, 'sub', 'deep', 'b.md'), 'utf8')).toBe('# b');
   });
+
+  it('read вне каталога → ошибка', async () => {
+    const tf = new FdTaskFile(root);
+    await expect(tf.read('../outside.md')).rejects.toThrow('вне каталога');
+  });
+
+  it('write вне каталога → ошибка', async () => {
+    const tf = new FdTaskFile(root);
+    await expect(tf.write('../outside.md', 'x')).rejects.toThrow('вне каталога');
+  });
+
+  it('абсолютный путь вне каталога → ошибка', async () => {
+    const tf = new FdTaskFile(root);
+    await expect(tf.read('/etc/passwd')).rejects.toThrow('вне каталога');
+  });
 });
