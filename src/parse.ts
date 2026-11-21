@@ -114,6 +114,19 @@ function stripFields(text: string): string {
   return (out + text.slice(prev)).trim();
 }
 
+/** Убрать inline-поля из строки, сохранив пробелы/отступы (для преамбулы). */
+function stripFieldsKeepWhitespace(text: string): string {
+  const fields = scanFields(text);
+  if (fields.length === 0) return text;
+  let out = '';
+  let prev = 0;
+  for (const f of fields) {
+    out += text.slice(prev, f.start);
+    prev = f.end;
+  }
+  return out + text.slice(prev);
+}
+
 /**
  * Разбор заголовка на title + idx. Если последний whitespace-токен — целое
  * число (со знаком `-`), он становится `idx`, остаток — `title`; иначе
@@ -244,7 +257,7 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
 
     if (allowText) {
       if (currentItem) bodyLines.push(line);
-      else preambleLines.push(stripFields(line));
+      else preambleLines.push(stripFieldsKeepWhitespace(line));
     }
     const fields = currentItem ? extractFields(line, 'body') : extractFields(line);
     if (fields.length > 0) {
@@ -254,6 +267,13 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
   }
 
   if (allowText && currentItem) currentItem.text = finishText(bodyLines);
+
+  // Файл без заголовков: весь текст — преамбула (иначе он теряется, так как
+  // `result.text` выше присваивается только на первом заголовке).
+  if (allowText && result.itemList.length === 0) {
+    const preamble = finishText(preambleLines);
+    result.text = preamble === null ? null : preamble.trimEnd();
+  }
 
   return result;
 }

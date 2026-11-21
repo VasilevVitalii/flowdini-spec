@@ -82,6 +82,25 @@ describe('textToStructure (allowText: true)', () => {
     expect(res.inlineList).toEqual([]);
   });
 
+  it('файл без заголовков → весь текст в text (преамбула)', () => {
+    const content = 'Строка один.\n\nСтрока два.';
+    const res = textToStructure(content, true);
+    expect(res.text).toBe('Строка один.\n\nСтрока два.');
+    expect(res.inlineList).toEqual([]);
+    expect(res.itemList).toEqual([]);
+  });
+
+  it('contentToText round-trip файла без заголовков', () => {
+    const src = 'Строка один.\n\nСтрока два.';
+    expect(contentToText(textToStructure(src, true))).toBe(src);
+  });
+
+  it('преамбула без заголовков сохраняет отступы вложенных списков', () => {
+    const src = '- пункт\n   - вложенный пункт';
+    expect(textToStructure(src, true).text).toBe(src);
+    expect(contentToText(textToStructure(src, true))).toBe(src);
+  });
+
   it('преамбула-текст с полем: текст отдельно, поле в inlineList', () => {
     const content = 'Заголовок проекта.\n[project:: returns]\n# h1';
     const res = textToStructure(content, true);
