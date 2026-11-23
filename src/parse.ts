@@ -308,15 +308,26 @@ export function levelToText(level: TFdLevel, headingLevel: 1 | 2 | 3): string {
 }
 
 /**
+ * Самый глубокий заданный уровень топика + его heading-уровень (1|2|3).
+ * Пустой топик → `null`. Единая точка для сериализации заголовка —
+ * используется и в `topicToText`, и в каноничном форматтере движка.
+ */
+export function topicHeading(topic: TFdTopic): { heading: TFdLevel; level: 1 | 2 | 3 } | null {
+  const heading = topic.level3 ?? topic.level2 ?? topic.level1;
+  if (!heading) return null;
+  const level: 1 | 2 | 3 = topic.level3 ? 3 : topic.level2 ? 2 : 1;
+  return { heading, level };
+}
+
+/**
  * Заголовок самого глубокого заданного уровня; поля `topic` — отдельными
  * строками следом, поля `body` пропускаются (они уже в `text`). Пустой
  * топик → `''`.
  */
 export function topicToText(topic: TFdTopic): string {
-  const deepest = topic.level3 ?? topic.level2 ?? topic.level1;
-  if (!deepest) return '';
-  const headingLevel: 1 | 2 | 3 = topic.level3 ? 3 : topic.level2 ? 2 : 1;
-  const head = levelToText(deepest, headingLevel);
+  const th = topicHeading(topic);
+  if (th === null) return '';
+  const head = levelToText(th.heading, th.level);
   const topicFields = topic.inlineList
     .filter((f) => f.source === 'topic')
     .map(inlineFieldToText);
@@ -335,4 +346,28 @@ export function contentToText(content: TFdContent): string {
   for (const field of content.inlineList) parts.push(inlineFieldToText(field));
   for (const item of content.itemList) parts.push(itemToText(item));
   return parts.join('\n');
+}
+
+/**
+ * Вырезать fenced-блоки (```...``` или ~~~...~~~), чтобы их содержимое
+ * (примеры кода) не участвовало в дальнейшем разборе (например, проверке
+ * ссылок). Единая точка — парсер знает формат fence.
+ */
+export function stripFences(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let fence: { char: string; len: number } | null = null;
+  for (const line of lines) {
+    if (fence) {
+      if (new RegExp(`^ {0,3}${fence.char}{${fence.len},}\\s*$`).test(line)) fence = null;
+      continue;
+    }
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (m) {
+      fence = { char: m[1][0], len: m[1].length };
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
 }

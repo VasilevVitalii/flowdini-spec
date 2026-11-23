@@ -3,9 +3,11 @@ export {
   textToStructure,
   inlineFieldToText,
   levelToText,
+  topicHeading,
   topicToText,
   itemToText,
   contentToText,
+  stripFences,
 } from './parse.js';
 export {
   builder,
