@@ -113,6 +113,16 @@ describe('textToStructure (allowText: true)', () => {
     expect(contentToText(textToStructure(src, true))).toBe(src);
   });
 
+  it('contentToText: тело со строкой-полем не сливается со свойствами (round-trip)', () => {
+    // Пустая строка между свойствами и телом обязательна: без неё строка-поле в начале
+    // тела при повторном разборе стала бы свойством топика (source 'body' → 'topic').
+    const src = '# X 1\n[fd-from:: A]\n\n[note:: в теле]\nrest';
+    const once = contentToText(textToStructure(src, true));
+    expect(once).toBe(src);
+    // Идемпотентность: повторный разбор/сериализация структуру не меняет.
+    expect(contentToText(textToStructure(once, true))).toBe(once);
+  });
+
   it('### без предков → level1/level2 null', () => {
     const content = '### chapter 3';
     expect(textToStructure(content, true).itemList[0]).toEqual({

@@ -352,7 +352,18 @@ export function topicToText(topic: TFdTopic): string {
 
 export function itemToText(item: TFdItem): string {
   const head = topicToText(item.topic);
-  return item.text === null ? head : `${head}\n${item.text}`;
+  if (item.text === null) return head;
+  // Если тело начинается строкой, целиком состоящей из inline-полей, а у топика
+  // есть свойства, повторный разбор примет её за свойство (`source: 'body'` →
+  // `'topic'`). Пустая строка отделяет свойства от тела и сохраняет round-trip.
+  // В остальных случаях её не добавляем: `# h1\nbody` без свойств должен
+  // переживать round-trip без лишней пустой строки.
+  const firstLine = item.text.split('\n')[0];
+  const bodyStartsWithField =
+    item.topic.inlineList.some((f) => f.source === 'topic') &&
+    scanFields(firstLine).length > 0 &&
+    stripFields(firstLine) === '';
+  return bodyStartsWithField ? `${head}\n\n${item.text}` : `${head}\n${item.text}`;
 }
 
 /** Преамбула (текст, затем поля по строке на поле) + элементы, склеенные через `\n`. */
