@@ -45,11 +45,21 @@ function scanFields(text: string): RawField[] {
   const fields: RawField[] = [];
   let i = 0;
   let inCode = false;
+  let codeLen = 0;
   while (i < text.length) {
     const c = text[i];
     if (c === '`') {
-      inCode = !inCode;
-      i++;
+      // Ран бэктиков — ограничитель inline-code: спан закрывается раном той же
+      // длины, поэтому двойные бэктики (``...``) защищают содержимое от разбора.
+      let n = 0;
+      while (i + n < text.length && text[i + n] === '`') n++;
+      if (!inCode) {
+        inCode = true;
+        codeLen = n;
+      } else if (n === codeLen) {
+        inCode = false;
+      }
+      i += n;
       continue;
     }
     if (inCode) {
@@ -150,10 +160,16 @@ function parseLevel(text: string): TFdLevel {
 
 const HEADING_RE = /^ {0,3}(#{1,3})(?:[ \t]+(.*))?$/;
 
+/** Закрывающая последовательность `#` (после пробела) — синтаксис ATX, не текст. */
+function stripClosingHashes(text: string): string {
+  const m = /^(.*?)[ \t]+#+[ \t]*$/.exec(text);
+  return m ? m[1] : text;
+}
+
 function matchHeading(line: string): { level: 1 | 2 | 3; text: string } | null {
   const m = HEADING_RE.exec(line);
   if (!m) return null;
-  return { level: m[1].length as 1 | 2 | 3, text: m[2] ?? '' };
+  return { level: m[1].length as 1 | 2 | 3, text: stripClosingHashes(m[2] ?? '') };
 }
 
 const OPEN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;

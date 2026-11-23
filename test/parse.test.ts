@@ -252,6 +252,14 @@ describe('textToStructure (allowText: true)', () => {
         idx: 0,
       });
     });
+
+    it('закрывающие # нормализуются: ## Q 1 ## → title "Q", idx 1', () => {
+      const content = '## Q 1 ##';
+      expect(textToStructure(content, true).itemList[0].topic.level2).toEqual({
+        title: 'Q',
+        idx: 1,
+      });
+    });
   });
 });
 
@@ -395,6 +403,13 @@ describe('краевые случаи полей', () => {
     const res = textToStructure(content, true);
     expect(res.itemList[0].topic.inlineList).toEqual([]);
     expect(res.itemList[0].text).toBe('`[par:: val]`');
+  });
+
+  it('поле в inline-коде с двойными бэктиками не парсится', () => {
+    const content = '# h\n``[par:: val]``';
+    const res = textToStructure(content, true);
+    expect(res.itemList[0].topic.inlineList).toEqual([]);
+    expect(res.itemList[0].text).toBe('``[par:: val]``');
   });
 });
 
