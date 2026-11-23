@@ -136,7 +136,14 @@ function parseLevel(text: string): TFdLevel {
   const trimmed = text.trim();
   const m = /^(.*\S)\s+(-?\d+)$/.exec(trimmed);
   if (m) {
-    return { title: m[1], idx: Number(m[2]) };
+    const digits = m[2];
+    const num = Number(digits);
+    // Ведущие нули (`007`) и выход за безопасный диапазон — не номер:
+    // иначе `[[#X 007]]` рассинхронизируется с каноничным `X 7`.
+    if (!/^-?0\d/.test(digits) && Number.isSafeInteger(num)) {
+      return { title: m[1], idx: num };
+    }
+    return { title: trimmed, idx: 0 };
   }
   return { title: trimmed, idx: 0 };
 }
@@ -175,7 +182,8 @@ function finishText(bodyLines: string[]): string | null {
  * Inline-поля индексируются в `topic.inlineList` в обоих режимах и помечаются
  * `source` по месту:
  * - `topic` — на отдельной строке свойств сразу после заголовка (до начала
- *   тела; такие строки состоят только из полей, пустые строки допускаются);
+ *   тела; такие строки состоят только из полей; пустая строка завершает зону
+ *   свойств, дальше — тело);
  * - `body` — в теле раздела (строка с обычным текстом или после начала тела).
  *
  * Поля `topic` не входят в `text` — это свойства топика, а не тело. Поля на
@@ -199,7 +207,10 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
 
   for (const line of lines) {
     if (inFence) {
-      if (allowText) bodyLines.push(line);
+      if (allowText) {
+        if (currentItem) bodyLines.push(line);
+        else preambleLines.push(line);
+      }
       if (isClosingFence(line, fenceChar, fenceLen)) inFence = false;
       continue;
     }
@@ -210,7 +221,10 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
       fenceChar = open.char;
       fenceLen = open.len;
       inTopicProps = false; // fenced-блок — это тело
-      if (allowText) bodyLines.push(line);
+      if (allowText) {
+        if (currentItem) bodyLines.push(line);
+        else preambleLines.push(line);
+      }
       continue;
     }
 
@@ -246,7 +260,10 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
     // Обычная строка.
     const trimmed = line.trim();
     if (inTopicProps) {
-      if (trimmed === '') continue; // пустая строка в зоне свойств — разделитель
+      if (trimmed === '') {
+        inTopicProps = false; // пустая строка завершает зону свойств — дальше тело
+        continue;
+      }
       if (scanFields(line).length > 0 && stripFields(line) === '') {
         // строка целиком из inline-полей → свойства топика (не тело)
         if (currentItem) currentItem.topic.inlineList.push(...extractFields(line, 'topic'));

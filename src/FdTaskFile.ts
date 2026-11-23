@@ -35,7 +35,7 @@ export class FdTaskFile {
   private resolve(relativeFileName: string): string {
     const full = path.resolve(this.dir, relativeFileName);
     const rel = path.relative(this.dir, full);
-    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
       throw new Error(`Путь вне каталога задачи: ${relativeFileName}`);
     }
     return full;
