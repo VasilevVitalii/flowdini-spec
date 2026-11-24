@@ -3,6 +3,7 @@ import type {
   TFdInlineField,
   TFdItem,
   TFdLevel,
+  TFdPreambleLine,
   TFdTopic,
   TFdTopicField,
 } from './types.js';
@@ -108,10 +109,6 @@ function extractTopicFields(text: string, source: 'topic' | 'body'): TFdTopicFie
   return scanFields(text).map((f) => ({ param: f.param, valueList: parseValue(f.value), source }));
 }
 
-function extractPreambleFields(text: string): TFdInlineField[] {
-  return scanFields(text).map((f) => ({ param: f.param, valueList: parseValue(f.value) }));
-}
-
 function stripFields(text: string): string {
   const fields = scanFields(text);
   if (fields.length === 0) return text.trim();
@@ -124,17 +121,66 @@ function stripFields(text: string): string {
   return (out + text.slice(prev)).trim();
 }
 
-/** Убрать inline-поля из строки, сохранив пробелы/отступы (для преамбулы). */
-function stripFieldsKeepWhitespace(text: string): string {
-  const fields = scanFields(text);
-  if (fields.length === 0) return text;
-  let out = '';
+/**
+ * Разбить строку преамбулы на чередующиеся text/field-сегменты в исходном
+ * порядке. Пустая строка — text-сегмент с пустым текстом (разделитель абзацев
+ * сохраняется для точного round-trip; хвостовые срезает `finishPreamble`).
+ */
+function preambleSegments(line: string): TFdPreambleLine {
+  const fields = scanFields(line);
+  if (fields.length === 0) {
+    // Пустая строка — text-сегмент с пустым текстом (разделитель абзацев,
+    // сохраняется для точного round-trip; хвостовые срезает `finishPreamble`).
+    return [{ kind: 'text', text: line }];
+  }
+  const segs: TFdPreambleLine = [];
   let prev = 0;
   for (const f of fields) {
-    out += text.slice(prev, f.start);
+    const textPart = line.slice(prev, f.start);
+    if (textPart !== '') segs.push({ kind: 'text', text: textPart });
+    segs.push({ kind: 'field', field: { param: f.param, valueList: parseValue(f.value) } });
     prev = f.end;
   }
-  return out + text.slice(prev);
+  const tail = line.slice(prev);
+  if (tail !== '') segs.push({ kind: 'text', text: tail });
+  return segs;
+}
+
+/** Срезать хвостовые пустые строки преамбулы (разделитель перед первым заголовком). */
+function finishPreamble(lines: TFdPreambleLine[]): TFdPreambleLine[] {
+  const out = [...lines];
+  while (out.length > 0) {
+    const last = out[out.length - 1];
+    const hasContent = last.some((s) => s.kind === 'field' || s.text.trim() !== '');
+    if (!hasContent) out.pop();
+    else break;
+  }
+  return out;
+}
+
+/** Производный текст преамбулы (text-сегменты, склеенные построчно) — совместимость. */
+function preambleText(lines: TFdPreambleLine[]): string | null {
+  const textLines: string[] = [];
+  for (const line of lines) {
+    let t = '';
+    let hasField = false;
+    for (const s of line) {
+      if (s.kind === 'text') t += s.text;
+      else hasField = true;
+    }
+    // Строка целиком из полей не вносит пустую строку в текст.
+    if (hasField && t.trim() === '') continue;
+    textLines.push(t);
+  }
+  const text = textLines.join('\n');
+  return text.trim() === '' ? null : text.trimEnd();
+}
+
+/** Производный список полей преамбулы — совместимость. */
+function preambleFields(lines: TFdPreambleLine[]): TFdInlineField[] {
+  const fields: TFdInlineField[] = [];
+  for (const line of lines) for (const s of line) if (s.kind === 'field') fields.push(s.field);
+  return fields;
 }
 
 /**
@@ -206,7 +252,7 @@ function finishText(bodyLines: string[]): string | null {
  * строке заголовка не поддерживаются (стали бы частью `title`).
  */
 export function textToStructure(text: string, allowText: boolean): TFdContent {
-  const result: TFdContent = { inlineList: [], itemList: [], text: null };
+  const result: TFdContent = { inlineList: [], itemList: [], text: null, preamble: [] };
   const lines = text.split(/\r?\n/);
 
   let level1: TFdLevel | null = null;
@@ -214,7 +260,7 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
   let level3: TFdLevel | null = null;
   let currentItem: TFdItem | null = null;
   let bodyLines: string[] = [];
-  let preambleLines: string[] = [];
+  const preambleSegs: TFdPreambleLine[] = [];
   let inTopicProps = false;
 
   let inFence = false;
@@ -225,7 +271,7 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
     if (inFence) {
       if (allowText) {
         if (currentItem) bodyLines.push(line);
-        else preambleLines.push(line);
+        else preambleSegs.push([{ kind: 'text', text: line }]);
       }
       if (isClosingFence(line, fenceChar, fenceLen)) inFence = false;
       continue;
@@ -239,7 +285,7 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
       inTopicProps = false; // fenced-блок — это тело
       if (allowText) {
         if (currentItem) bodyLines.push(line);
-        else preambleLines.push(line);
+        else preambleSegs.push([{ kind: 'text', text: line }]);
       }
       continue;
     }
@@ -248,9 +294,13 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
     if (heading) {
       if (allowText && currentItem) currentItem.text = finishText(bodyLines);
       bodyLines = [];
-      if (allowText && result.itemList.length === 0) {
-        const preamble = finishText(preambleLines);
-        result.text = preamble === null ? null : preamble.trimEnd();
+      if (result.itemList.length === 0) {
+        const segs = finishPreamble(preambleSegs);
+        if (allowText) {
+          result.preamble = segs;
+          result.text = preambleText(segs);
+        }
+        result.inlineList = preambleFields(segs);
       }
 
       const level = parseLevel(heading.text);
@@ -290,12 +340,13 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
 
     if (allowText) {
       if (currentItem) bodyLines.push(line);
-      else preambleLines.push(stripFieldsKeepWhitespace(line));
+      else preambleSegs.push(preambleSegments(line));
+    } else if (!currentItem) {
+      // allowText=false: текст преамбулы не хранится, но поля нужны для inlineList.
+      preambleSegs.push(preambleSegments(line).filter((s) => s.kind === 'field'));
     }
     if (currentItem) {
       currentItem.topic.inlineList.push(...extractTopicFields(line, 'body'));
-    } else {
-      result.inlineList.push(...extractPreambleFields(line));
     }
   }
 
@@ -303,9 +354,13 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
 
   // Файл без заголовков: весь текст — преамбула (иначе он теряется, так как
   // `result.text` выше присваивается только на первом заголовке).
-  if (allowText && result.itemList.length === 0) {
-    const preamble = finishText(preambleLines);
-    result.text = preamble === null ? null : preamble.trimEnd();
+  if (result.itemList.length === 0) {
+    const segs = finishPreamble(preambleSegs);
+    if (allowText) {
+      result.preamble = segs;
+      result.text = preambleText(segs);
+    }
+    result.inlineList = preambleFields(segs);
   }
 
   return result;
@@ -364,12 +419,31 @@ export function itemToText(item: TFdItem): string {
   return bodyStartsWithField ? `${head}\n\n${item.text}` : `${head}\n${item.text}`;
 }
 
-/** Преамбула (текст, затем поля по строке на поле) + элементы, склеенные через `\n`. */
+/** Преамбула (текст и поля в исходном порядке) + элементы, склеенные через `\n`. */
 export function contentToText(content: TFdContent): string {
+  const parts: string[] = [];
+  const preamble = preambleToText(content);
+  if (preamble !== '') parts.push(preamble);
+  for (const item of content.itemList) parts.push(itemToText(item));
+  return parts.join('\n');
+}
+
+/**
+ * Преамбула как текст. Если парсер заполнил `preamble` — точный порядок
+ * (текст и поля чередуются, как в исходнике). Иначе откат на `text` + `inlineList`
+ * (структуры, собранные вручную).
+ */
+export function preambleToText(content: TFdContent): string {
+  if (content.preamble !== undefined) {
+    return content.preamble
+      .map((line) =>
+        line.map((s) => (s.kind === 'text' ? s.text : inlineFieldToText(s.field))).join(''),
+      )
+      .join('\n');
+  }
   const parts: string[] = [];
   if (content.text !== null) parts.push(content.text);
   for (const field of content.inlineList) parts.push(inlineFieldToText(field));
-  for (const item of content.itemList) parts.push(itemToText(item));
   return parts.join('\n');
 }
 

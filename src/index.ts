@@ -7,6 +7,7 @@ export {
   topicToText,
   itemToText,
   contentToText,
+  preambleToText,
   stripFences,
   HEADING_RE,
   openFence,
@@ -27,4 +28,6 @@ export type {
   TFdLevel,
   TFdInlineField,
   TFdTopicField,
+  TFdPreambleSegment,
+  TFdPreambleLine,
 } from './types.js';

@@ -21,6 +21,7 @@ describe('textToStructure (allowText: true)', () => {
     expect(textToStructure(content, true)).toEqual({
       inlineList: [],
       text: null,
+      preamble: [],
       itemList: [
         {
           topic: {
@@ -61,6 +62,7 @@ describe('textToStructure (allowText: true)', () => {
     expect(textToStructure(content, true)).toEqual({
       inlineList: [{ param: 'p', valueList: ['v'] }],
       text: null,
+      preamble: [[{ kind: 'field', field: { param: 'p', valueList: ['v'] } }]],
       itemList: [
         {
           topic: {
@@ -80,6 +82,33 @@ describe('textToStructure (allowText: true)', () => {
     const res = textToStructure(content, true);
     expect(res.text).toBe('Вводный текст.');
     expect(res.inlineList).toEqual([]);
+  });
+
+  it('преамбула: поле до текста — точный порядок, без ведущего \\n', () => {
+    const content = '[p:: v]\nтекст\n# h1';
+    const res = textToStructure(content, true);
+    expect(res.preamble).toEqual([
+      [{ kind: 'field', field: { param: 'p', valueList: ['v'] } }],
+      [{ kind: 'text', text: 'текст' }],
+    ]);
+    expect(res.text).toBe('текст'); // ведущий \n отсутствует
+    expect(contentToText(res)).toBe('[p:: v]\nтекст\n# h1');
+  });
+
+  it('преамбула: поле после текста — порядок сохраняется', () => {
+    const content = 'текст\n[p:: v]\n# h1';
+    const res = textToStructure(content, true);
+    expect(res.preamble).toEqual([
+      [{ kind: 'text', text: 'текст' }],
+      [{ kind: 'field', field: { param: 'p', valueList: ['v'] } }],
+    ]);
+    expect(contentToText(res)).toBe('текст\n[p:: v]\n# h1');
+  });
+
+  it('преамбула: поле в середине текста', () => {
+    const content = '[a:: 1] текст [b:: 2]\n# h1';
+    const res = textToStructure(content, true);
+    expect(contentToText(res)).toBe('[a:: 1] текст [b:: 2]\n# h1');
   });
 
   it('файл без заголовков → весь текст в text (преамбула)', () => {

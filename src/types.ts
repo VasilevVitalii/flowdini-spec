@@ -31,6 +31,14 @@ export interface TFdItem {
   text: string | null;
 }
 
+/** Сегмент преамбулы: кусок текста или inline-поле (в исходном порядке). */
+export type TFdPreambleSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'field'; field: TFdInlineField };
+
+/** Одна строка преамбулы: чередующиеся text/field-сегменты. */
+export type TFdPreambleLine = TFdPreambleSegment[];
+
 /** Распарсенный контент одного файла: преамбула + элементы. */
 export interface TFdContent {
   /** Преамбула: inline-поля до первого заголовка. */
@@ -38,4 +46,9 @@ export interface TFdContent {
   itemList: TFdItem[];
   /** Текст преамбулы (до первого заголовка) без inline-полей; `null` — текста нет. */
   text: string | null;
+  /** Точный порядок преамбулы (строки до первого заголовка; в каждой строке
+   *  text/field-сегменты чередуются, как в исходнике).
+   *  Заполняет парсер; опционален — структуры, собранные вручную, его не имеют,
+   *  и сериализация откатывается на `text` + `inlineList`. */
+  preamble?: TFdPreambleLine[];
 }
