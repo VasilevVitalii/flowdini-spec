@@ -43,14 +43,17 @@ for (const file of await files.list()) {
 | `inlineFieldToText` | `(field): string` | `[param:: v1, v2]`. |
 | `levelToText` | `(level, headingLevel: 1\|2\|3): string` | Заголовок: `### title 2`. |
 | `topicToText` | `(topic): string` | Заголовок самого глубокого заданного уровня; поля `topic` — отдельными строками следом, `body` пропускаются. |
-| `itemToText` | `(item): string` | Заголовок + `\n` + тело (если есть). |
+| `itemToText` | `(item): string` | Заголовок + `\n` + тело (если есть); если тело начинается строкой-полем, добавляется пустая строка — round-trip. |
 | `contentToText` | `(content): string` | Преамбула (по строке на поле) + элементы через `\n`. |
 | `topicHeading` | `(topic): { heading, level } \| null` | Самый глубокий заданный уровень топика (для сборки заголовка). |
 | `stripFences` | `(text): string` | Текст без fenced-блоков (``` и ~~~) — что осталось вне них. |
+| `HEADING_RE` | `RegExp` | Регэксп ATX-заголовка (0–3 пробела, `#`×1–3) — общая грамматика для потребителей. |
+| `openFence` | `(line) => { char, len } \| null` | Открывающий fence (``` или `~~~`) на строке. |
+| `isClosingFence` | `(line, char, len) => boolean` | Закрывающий fence той же длины. |
 
 ### `builder` — фабрики пустых структур
 
-`newInlineField()`, `newLevel()`, `newTopic()`, `newItem()`, `newContent()` — и объект `builder` с теми же функциями (без `this`, безопасны при деструктуризации).
+`newInlineField(source = 'topic')`, `newLevel()`, `newTopic()`, `newItem()`, `newContent()` — и объект `builder` с теми же функциями (без `this`, безопасны при деструктуризации).
 
 ## Типы
 
@@ -63,14 +66,18 @@ interface TFdLevel {
 interface TFdInlineField {
   param: string;
   valueList: string[];
-  source?: 'topic' | 'body';  // отдельная строка свойств / тело раздела
+  source?: 'topic' | 'body';  // опционален только в преамбуле
+}
+
+interface TFdTopicField extends TFdInlineField {
+  source: 'topic' | 'body';   // в топике source обязателен
 }
 
 interface TFdTopic {
   level1: TFdLevel | null;
   level2: TFdLevel | null;
   level3: TFdLevel | null;
-  inlineList: TFdInlineField[];
+  inlineList: TFdTopicField[];
 }
 
 interface TFdItem {
@@ -101,7 +108,7 @@ interface TFdContent {
 
 ### Inline Fields
 
-- Формат `[param:: value]`; разделитель — **первое** `::`, обе части тримятся.
+- Формат `[param:: value]`; разделитель — `::`, обе части тримятся. Имя поля не может содержать `:`: сканер читает имя до первого `:`, и дальше обязана идти пара `::` (одиночный `:` в имени поля делает запись не-полем).
 - Запятая — разделитель списка значений, но внутри вложенных скобок `[[...]]` не разделяет (балансирующий сканер): `[fd-reply:: [[#A 1]]]`, `[par:: [[#A 1]], x]` → `["[[#A 1]]", "x"]`.
 - Одиночный `:` в значении допустим: `[fd-from:: AI:Architect]`.
 - Значение может содержать вложенные скобки `[[...]]` (адрес `fd-reply`): `[fd-reply:: [[#PART 2##CHAPTER 3]]]`.
@@ -128,7 +135,7 @@ interface TFdContent {
 
 ## Сериализация
 
-Собирает структуру обратно в md: `contentToText` → `itemToText` → `topicToText` → `levelToText` / `inlineFieldToText`. `text` сериализуется как есть. Поля без `source` (преамбула) идут в преамбулу, поля `source: 'topic'` — отдельными строками после заголовка; поля `source: 'body'` не выводятся (они уже в `text`) — round-trip без дублирования.
+Собирает структуру обратно в md: `contentToText` → `itemToText` → `topicToText` → `levelToText` / `inlineFieldToText`. `text` сериализуется как есть. Поля без `source` (преамбула) идут в преамбулу, поля `source: 'topic'` — отдельными строками после заголовка; поля `source: 'body'` не выводятся (они уже в `text`) — round-trip без дублирования. Если тело начинается строкой, целиком состоящей из inline-полей, перед ним вставляется пустая строка, иначе повторный разбор повысит это поле до свойства топика.
 
 ## Пример
 

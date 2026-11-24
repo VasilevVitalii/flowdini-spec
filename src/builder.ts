@@ -1,13 +1,13 @@
 import type {
   TFdContent,
-  TFdInlineField,
   TFdItem,
   TFdLevel,
   TFdTopic,
+  TFdTopicField,
 } from './types.js';
 
-export function newInlineField(): TFdInlineField {
-  return { param: '', valueList: [] };
+export function newInlineField(source: 'topic' | 'body' = 'topic'): TFdTopicField {
+  return { param: '', valueList: [], source };
 }
 
 export function newLevel(): TFdLevel {

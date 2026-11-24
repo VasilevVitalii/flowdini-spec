@@ -8,6 +8,9 @@ export {
   itemToText,
   contentToText,
   stripFences,
+  HEADING_RE,
+  openFence,
+  isClosingFence,
 } from './parse.js';
 export {
   builder,
@@ -23,4 +26,5 @@ export type {
   TFdTopic,
   TFdLevel,
   TFdInlineField,
+  TFdTopicField,
 } from './types.js';

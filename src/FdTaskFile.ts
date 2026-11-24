@@ -18,14 +18,54 @@ export class FdTaskFile {
   }
 
   async read(relativeFileName: string): Promise<string> {
-    return fs.readFile(this.resolve(relativeFileName), 'utf8');
+    const fullPath = this.resolve(relativeFileName);
+    await this.assertWithinRealDir(fullPath, relativeFileName);
+    return fs.readFile(fullPath, 'utf8');
   }
 
   /** Создаёт родительские каталоги при необходимости. */
   async write(relativeFileName: string, text: string): Promise<void> {
     const fullPath = this.resolve(relativeFileName);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    await this.assertParentWithinRealDir(fullPath, relativeFileName);
+    // Отказ, если конечный компонент — симлинк: запись через ссылку наружу
+    // обходит containment (lstat не раскрывает ссылку).
+    try {
+      const st = await fs.lstat(fullPath);
+      if (st.isSymbolicLink()) {
+        throw new Error(`Симлинк в пути записи: ${relativeFileName}`);
+      }
+    } catch (e) {
+      if ((e as { code?: string }).code !== 'ENOENT') throw e;
+    }
     await fs.writeFile(fullPath, text, 'utf8');
+  }
+
+  /**
+   * Лексический `resolve` не ловит симлинки: realpath целевого файла обязан
+   * лежать внутри realpath каталога — иначе `../`-через-ссылку выводит наружу.
+   */
+  private async assertWithinRealDir(fullPath: string, relativeFileName: string): Promise<void> {
+    const dirReal = await fs.realpath(this.dir);
+    const fileReal = await fs.realpath(fullPath);
+    if (!this.isInside(fileReal, dirReal)) {
+      throw new Error(`Файл вне каталога задачи (симлинк): ${relativeFileName}`);
+    }
+  }
+
+  private async assertParentWithinRealDir(
+    fullPath: string,
+    relativeFileName: string,
+  ): Promise<void> {
+    const dirReal = await fs.realpath(this.dir);
+    const parentReal = await fs.realpath(path.dirname(fullPath));
+    if (parentReal !== dirReal && !this.isInside(parentReal, dirReal)) {
+      throw new Error(`Каталог вне задачи (симлинк): ${relativeFileName}`);
+    }
+  }
+
+  private isInside(p: string, dir: string): boolean {
+    return p.startsWith(dir + path.sep);
   }
 
   /**

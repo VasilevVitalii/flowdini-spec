@@ -3,7 +3,8 @@ import { builder, newContent, newItem, newLevel, newTopic } from '../src/builder
 
 describe('builder', () => {
   it('newInlineField', () => {
-    expect(builder.newInlineField()).toEqual({ param: '', valueList: [] });
+    expect(builder.newInlineField()).toEqual({ param: '', valueList: [], source: 'topic' });
+    expect(builder.newInlineField('body')).toEqual({ param: '', valueList: [], source: 'body' });
   });
 
   it('newLevel', () => {

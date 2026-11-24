@@ -4,6 +4,7 @@ import type {
   TFdItem,
   TFdLevel,
   TFdTopic,
+  TFdTopicField,
 } from './types.js';
 
 /**
@@ -92,8 +93,9 @@ function scanFields(text: string): RawField[] {
       k++;
     }
     if (depth > 0) {
-      // Незакрытая скобка — не поле, пропускаем этот '['.
-      i++;
+      // Незакрытая скобка — не поле; хвост уже отсканирован (k дошёл до конца),
+      // перескакиваем на k, а не i++ — иначе O(n²) на строке из незакрытых `[`.
+      i = k;
       continue;
     }
     fields.push({ param, value: text.slice(j + 2, k - 1), start: i, end: k });
@@ -102,14 +104,12 @@ function scanFields(text: string): RawField[] {
   return fields;
 }
 
-function extractFields(text: string, source?: 'topic' | 'body'): TFdInlineField[] {
-  const out: TFdInlineField[] = [];
-  for (const f of scanFields(text)) {
-    const field: TFdInlineField = { param: f.param, valueList: parseValue(f.value) };
-    if (source) field.source = source;
-    out.push(field);
-  }
-  return out;
+function extractTopicFields(text: string, source: 'topic' | 'body'): TFdTopicField[] {
+  return scanFields(text).map((f) => ({ param: f.param, valueList: parseValue(f.value), source }));
+}
+
+function extractPreambleFields(text: string): TFdInlineField[] {
+  return scanFields(text).map((f) => ({ param: f.param, valueList: parseValue(f.value) }));
 }
 
 function stripFields(text: string): string {
@@ -158,7 +158,7 @@ function parseLevel(text: string): TFdLevel {
   return { title: trimmed, idx: 0 };
 }
 
-const HEADING_RE = /^ {0,3}(#{1,3})(?:[ \t]+(.*))?$/;
+export const HEADING_RE = /^ {0,3}(#{1,3})(?:[ \t]+(.*))?$/;
 
 /** Закрывающая последовательность `#` (после пробела) — синтаксис ATX, не текст. */
 function stripClosingHashes(text: string): string {
@@ -174,13 +174,13 @@ function matchHeading(line: string): { level: 1 | 2 | 3; text: string } | null {
 
 const OPEN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 
-function openFence(line: string): { char: string; len: number } | null {
+export function openFence(line: string): { char: string; len: number } | null {
   const m = OPEN_FENCE_RE.exec(line);
   if (!m) return null;
   return { char: m[1][0], len: m[1].length };
 }
 
-function isClosingFence(line: string, char: string, len: number): boolean {
+export function isClosingFence(line: string, char: string, len: number): boolean {
   const re = new RegExp(`^ {0,3}${char}{${len},}\\s*$`);
   return re.test(line);
 }
@@ -282,7 +282,7 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
       }
       if (scanFields(line).length > 0 && stripFields(line) === '') {
         // строка целиком из inline-полей → свойства топика (не тело)
-        if (currentItem) currentItem.topic.inlineList.push(...extractFields(line, 'topic'));
+        if (currentItem) currentItem.topic.inlineList.push(...extractTopicFields(line, 'topic'));
         continue;
       }
       inTopicProps = false; // строка содержит текст → начало тела
@@ -292,10 +292,10 @@ export function textToStructure(text: string, allowText: boolean): TFdContent {
       if (currentItem) bodyLines.push(line);
       else preambleLines.push(stripFieldsKeepWhitespace(line));
     }
-    const fields = currentItem ? extractFields(line, 'body') : extractFields(line);
-    if (fields.length > 0) {
-      if (currentItem) currentItem.topic.inlineList.push(...fields);
-      else result.inlineList.push(...fields);
+    if (currentItem) {
+      currentItem.topic.inlineList.push(...extractTopicFields(line, 'body'));
+    } else {
+      result.inlineList.push(...extractPreambleFields(line));
     }
   }
 
@@ -353,16 +353,14 @@ export function topicToText(topic: TFdTopic): string {
 export function itemToText(item: TFdItem): string {
   const head = topicToText(item.topic);
   if (item.text === null) return head;
-  // Если тело начинается строкой, целиком состоящей из inline-полей, а у топика
-  // есть свойства, повторный разбор примет её за свойство (`source: 'body'` →
-  // `'topic'`). Пустая строка отделяет свойства от тела и сохраняет round-trip.
-  // В остальных случаях её не добавляем: `# h1\nbody` без свойств должен
-  // переживать round-trip без лишней пустой строки.
+  // Если тело начинается строкой, целиком состоящей из inline-полей, повторный
+  // разбор примет её за свойство топика (`source: 'body'` → `'topic'`). Пустая
+  // строка отделяет свойства от тела и сохраняет round-trip. В остальных
+  // случаях её не добавляем: `# h1\nbody` без свойств должен переживать
+  // round-trip без лишней пустой строки.
   const firstLine = item.text.split('\n')[0];
   const bodyStartsWithField =
-    item.topic.inlineList.some((f) => f.source === 'topic') &&
-    scanFields(firstLine).length > 0 &&
-    stripFields(firstLine) === '';
+    scanFields(firstLine).length > 0 && stripFields(firstLine) === '';
   return bodyStartsWithField ? `${head}\n\n${item.text}` : `${head}\n${item.text}`;
 }
 

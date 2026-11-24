@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -56,5 +56,40 @@ describe('FdTaskFile', () => {
   it('абсолютный путь вне каталога → ошибка', async () => {
     const tf = new FdTaskFile(root);
     await expect(tf.read('/etc/passwd')).rejects.toThrow('вне каталога');
+  });
+
+  it('read через симлинк наружу → ошибка (realpath containment)', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'fdmd-out-'));
+    try {
+      await writeFile(path.join(outside, 'secret.md'), '# secret');
+      await symlink(path.join(outside, 'secret.md'), path.join(root, 'link.md'));
+      const tf = new FdTaskFile(root);
+      await expect(tf.read('link.md')).rejects.toThrow('симлинк');
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('write через симлинк (конечный компонент) → ошибка', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'fdmd-out-'));
+    try {
+      await writeFile(path.join(outside, 'target.md'), 'x');
+      await symlink(path.join(outside, 'target.md'), path.join(root, 'link.md'));
+      const tf = new FdTaskFile(root);
+      await expect(tf.write('link.md', '# pwned')).rejects.toThrow('Симлинк');
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('write в подкаталог-симлинк наружу → ошибка (realpath родителя)', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'fdmd-out-'));
+    try {
+      await symlink(outside, path.join(root, 'sub'));
+      const tf = new FdTaskFile(root);
+      await expect(tf.write('sub/deep.md', '# x')).rejects.toThrow('симлинк');
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });

@@ -123,6 +123,16 @@ describe('textToStructure (allowText: true)', () => {
     expect(contentToText(textToStructure(once, true))).toBe(once);
   });
 
+  it('itemToText: тело со строкой-полем и без свойств топика — пустая строка сохраняет round-trip', () => {
+    // Топик без свойств: тело начинается строкой-полем. Пустая строка обязана
+    // ставиться и здесь — иначе при повторном разборе поле тела повысится до
+    // свойства топика (source 'body' → 'topic').
+    const src = '# X 1\n\n[note:: в теле]\nrest';
+    const once = contentToText(textToStructure(src, true));
+    expect(once).toBe(src);
+    expect(contentToText(textToStructure(once, true))).toBe(once);
+  });
+
   it('### без предков → level1/level2 null', () => {
     const content = '### chapter 3';
     expect(textToStructure(content, true).itemList[0]).toEqual({
@@ -306,16 +316,6 @@ describe('сериализация', () => {
 
   it('levelToText: без idx', () => {
     expect(levelToText({ title: 'chapter', idx: 0 }, 3)).toBe('### chapter');
-  });
-
-  it('topicToText: поле без source не выводится (нет места для него)', () => {
-    const topic = {
-      level1: { title: 'chapter', idx: 1 },
-      level2: { title: 'chapter', idx: 2 },
-      level3: null,
-      inlineList: [{ param: 'par', valueList: ['val'] }],
-    };
-    expect(topicToText(topic)).toBe('## chapter 2');
   });
 
   it('topicToText: topic-поля — отдельной строкой после заголовка', () => {

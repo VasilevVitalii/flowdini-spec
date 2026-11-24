@@ -12,12 +12,17 @@ export interface TFdLevel {
   idx: number;
 }
 
+/** Поле топика: `source` обязателен (`topic` — строка свойств, `body` — поле в теле). */
+export interface TFdTopicField extends TFdInlineField {
+  source: 'topic' | 'body';
+}
+
 /** Адресуемый узел: заголовки 1–3 уровней + привязанные inline-поля. Без текста. */
 export interface TFdTopic {
   level1: TFdLevel | null;
   level2: TFdLevel | null;
   level3: TFdLevel | null;
-  inlineList: TFdInlineField[];
+  inlineList: TFdTopicField[];
 }
 
 /** Элемент контента: узел (topic) + тело раздела. `text: null` — тела нет. */
