@@ -17,6 +17,7 @@ const files = new FdTaskFile('./specs');
 for (const file of await files.list()) {
   const text = await files.read(file);
   const content = textToStructure(text, true);
+  // content.preamble    — точный порядок строк преамбулы (text/field-сегменты)
   // content.inlineList  — поля до первого заголовка
   // content.text        — текст преамбулы (до первого заголовка) без полей; null — нет
   // content.itemList    — записи по заголовкам (topic + text)
@@ -49,7 +50,7 @@ for (const file of await files.list()) {
 | `stripFences` | `(text): string` | Текст без fenced-блоков (``` и ~~~) — что осталось вне них. |
 | `HEADING_RE` | `RegExp` | Регэксп ATX-заголовка (0–3 пробела, `#`×1–3) — общая грамматика для потребителей. |
 | `openFence` | `(line) => { char, len } \| null` | Открывающий fence (``` или `~~~`) на строке. |
-| `isClosingFence` | `(line, char, len) => boolean` | Закрывающий fence той же длины. |
+| `isClosingFence` | `(line, char, len) => boolean` | Закрывающий fence той же или большей длины (`{len,}`). |
 
 ### `builder` — фабрики пустых структур
 
@@ -85,10 +86,16 @@ interface TFdItem {
   text: string | null;  // тело раздела (сырой текст), null — тела нет
 }
 
+type TFdPreambleSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'field'; field: TFdInlineField };
+type TFdPreambleLine = TFdPreambleSegment[];
+
 interface TFdContent {
   inlineList: TFdInlineField[];  // преамбула: поля до первого заголовка
   itemList: TFdItem[];
   text: string | null;           // преамбула: текст до первого заголовка без полей; без заголовков — весь текст файла; null — нет
+  preamble?: TFdPreambleLine[];  // точный порядок строк преамбулы (text/field-сегменты); заполняет парсер, у собранных вручную структур отсутствует
 }
 ```
 
@@ -120,7 +127,7 @@ interface TFdContent {
 - После заголовка следующей строкой (а может и не быть) идут одна или несколько **строк свойств топика** — подряд идущих строк, состоящих только из inline-полей (первая пустая строка завершает зону свойств). Они принадлежат топику, а не телу.
 - Первая строка с обычным текстом начинает тело; всё, что дальше (включая строки с полями и fenced-блоки) — тело.
 - Поле привязывается к последнему открытому заголовку; поля до первого заголовка → верхний `inlineList` (преамбула).
-- Текст преамбулы сохраняется как есть, включая отступы вложенных списков; если заголовков в файле нет, весь текст файла — преамбула (`content.text`).
+- Преамбула сохраняется с точным порядком text/field-сегментов в `content.preamble` (`TFdPreambleLine[]`, заполняет парсер); `content.text` (текст без полей) и `content.inlineList` (поля) — производные от неё. Отступы вложенных списков сохраняются; CRLF нормализуется в LF. Если заголовков в файле нет, весь текст файла — преамбула.
 - Поля помечаются `source`:
   - `'topic'` — на отдельной строке свойств сразу после заголовка;
   - `'body'` — в теле раздела.
